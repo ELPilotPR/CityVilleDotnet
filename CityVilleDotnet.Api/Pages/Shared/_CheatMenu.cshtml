@@ -60,6 +60,20 @@
 			</div>
 			
 			<button class="btn btn-primary btn-sm" onclick="addInventoryItem()">Add item</button>
+
+			<hr>
+
+			<h6 class="mb-2">World</h6>
+
+			<div class="row g-2 mb-2">
+				<div class="col">
+					<label class="form-label form-label-sm mb-0">Building name (leave empty to remove ALL)</label>
+					<input type="text" class="form-control form-control-sm" id="cheatBuildingName"
+					       placeholder="e.g. res_acorncottage">
+				</div>
+			</div>
+
+			<button class="btn btn-danger btn-sm" onclick="removeBuildings()">Remove buildings</button>
 		</div>
 	</div>
 </div>
@@ -102,6 +116,26 @@
 		}).then(function (r) {
 			if (r.ok) showCheatAlert('Resources updated! Reload the game to see changes.', 'success');
 			else showCheatAlert('Error updating resources', 'danger');
+		}).catch(function () {
+			showCheatAlert('Request failed', 'danger');
+		});
+	}
+
+	function removeBuildings() {
+		const itemName = document.getElementById('cheatBuildingName').value.trim();
+		const msg = itemName
+			? 'Remove all "' + itemName + '" buildings?'
+			: 'Remove ALL buildings from your world? This cannot be undone!';
+
+		if (!confirm(msg)) return;
+
+		fetch('/api/cheat/remove-buildings', {
+			method: 'POST',
+			headers: {'Content-Type': 'application/json'},
+			body: JSON.stringify({itemName: itemName || null})
+		}).then(function (r) {
+			if (r.ok) showCheatAlert('Buildings removed! Reload the game.', 'success');
+			else showCheatAlert('Error removing buildings', 'danger');
 		}).catch(function () {
 			showCheatAlert('Request failed', 'danger');
 		});

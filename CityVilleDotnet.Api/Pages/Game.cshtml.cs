@@ -107,7 +107,7 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             flashVars["zcache_gameswf_gamesettings"] = "true";
             flashVars["zcache_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/zcache/ZCache.swf";
             flashVars["zcache_namespace"] = "cityville";
-            flashVars["zcache_max_frame_time"] = "12";
+            flashVars["zcache_max_frame_time"] = "30";
         }
 
         return string.Join("&", flashVars.Select(kvp => $"{kvp.Key}={kvp.Value}"));
