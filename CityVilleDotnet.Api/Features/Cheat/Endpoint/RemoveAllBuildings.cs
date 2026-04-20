@@ -31,7 +31,7 @@ internal sealed class RemoveAllBuildings(UserManager<ApplicationUser> userManage
             return;
         }
 
-        var user = await dbContext.Set<User>()
+        var user = await dbContext.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
