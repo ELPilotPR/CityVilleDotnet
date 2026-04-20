@@ -5,47 +5,41 @@ public class FallbackAssetMiddleware(
     IWebHostEnvironment env,
     ILogger<FallbackAssetMiddleware> logger)
 {
+    private static readonly Dictionary<string, string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".png"] = "image/png",
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif",
+        [".mp3"] = "audio/mpeg",
+        [".swf"] = "application/x-shockwave-flash",
+        [".css"] = "text/css"
+    };
+
     public async Task InvokeAsync(HttpContext context)
     {
-        await next(context);
-
-        if (context.Response.StatusCode == 404 && context.Request.Path.StartsWithSegments("/assets"))
+        if (context.Request.Path.StartsWithSegments("/assets"))
         {
             var extension = Path.GetExtension(context.Request.Path).ToLowerInvariant();
-            var contentType = extension switch
+
+            if (SupportedExtensions.TryGetValue(extension, out var contentType))
             {
-                ".png" => "image/png",
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".gif" => "image/gif",
-                ".mp3" => "audio/mpeg",
-                ".swf" => "application/x-shockwave-flash",
-                ".css" => "text/css",
-                _ => null
-            };
+                var requestedFile = Path.Combine(env.WebRootPath, context.Request.Path.Value!.TrimStart('/'));
 
-            if (contentType != null)
-            {
-                var defaultFile = Path.Combine(
-                    env.WebRootPath,
-                    "assets",
-                    $"default{extension}"
-                );
-
-                if (File.Exists(defaultFile))
+                if (!File.Exists(requestedFile))
                 {
-                    logger.LogWarning(
-                        "Asset not found: {RequestPath}, serving default fallback: {DefaultFile}",
-                        context.Request.Path,
-                        defaultFile);
+                    var defaultFile = Path.Combine(env.WebRootPath, "assets", $"default{extension}");
 
-                    context.Response.StatusCode = 200;
-                    context.Response.ContentType = contentType;
-                    context.Response.Headers.CacheControl = "public, max-age=2592000"; // 1 month
-                    context.Response.Headers.Expires = DateTime.UtcNow.AddMonths(1).ToString("R");
-                    await context.Response.SendFileAsync(defaultFile);
-                }
-                else
-                {
+                    if (File.Exists(defaultFile))
+                    {
+                        context.Response.StatusCode = 200;
+                        context.Response.ContentType = contentType;
+                        context.Response.Headers.CacheControl = "public, max-age=2592000";
+                        context.Response.Headers.Expires = DateTime.UtcNow.AddMonths(1).ToString("R");
+                        await context.Response.SendFileAsync(defaultFile);
+                        return;
+                    }
+
                     logger.LogWarning(
                         "Asset not found: {RequestPath}, but no default fallback exists at: {DefaultFile}",
                         context.Request.Path,
@@ -53,5 +47,7 @@ public class FallbackAssetMiddleware(
                 }
             }
         }
+
+        await next(context);
     }
 }

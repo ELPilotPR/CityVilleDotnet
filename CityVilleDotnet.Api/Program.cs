@@ -110,7 +110,13 @@ builder.Host.UseSerilog((context, configuration) => configuration.ReadFrom.Confi
 
 var app = builder.Build();
 
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers.CacheControl = "public, max-age=2592000"; // 1 month
+    }
+});
 app.UseMiddleware<FallbackAssetMiddleware>();
 app.UseRateLimiter();
 app.UseRouting();
