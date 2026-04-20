@@ -12,7 +12,7 @@ namespace CityVilleDotnet.Api.Services.QuestService;
 
 internal sealed class RequestManualQuest(CityVilleDbContext context, ILogger<RequestManualQuest> logger) : AmfService
 {
-    public override async Task<ASObject> HandlePacket(object[] @params, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(object[] @params, Guid playerId, CancellationToken cancellationToken)
     {
         if (@params.Length < 1)
             return GatewayService.CreateEmptyResponse();
@@ -22,14 +22,14 @@ internal sealed class RequestManualQuest(CityVilleDbContext context, ILogger<Req
         if (questName is null)
             throw new Exception("Quest name can't be null");
 
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .Include(x => x.Quests)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user is null)
-            throw new Exception($"User {userId} not found");
+        if (player is null)
+            throw new Exception("Player not found");
 
-        if (user.Quests.Any(x => x.Name == questName))
+        if (player.Quests.Any(x => x.Name == questName))
             return new CityVilleResponse().Data(new ASObject { { "questStarted", 0 } });
 
         var quest = QuestSettingsManager.Instance.GetItem(questName);
@@ -41,7 +41,7 @@ internal sealed class RequestManualQuest(CityVilleDbContext context, ILogger<Req
         }
 
         var newQuest = Quest.Create(questName, quest.Tasks.Tasks.Count, QuestType.Active);
-        user.Quests.Add(newQuest);
+        player.Quests.Add(newQuest);
 
         await context.SaveChangesAsync(cancellationToken);
 
@@ -49,7 +49,7 @@ internal sealed class RequestManualQuest(CityVilleDbContext context, ILogger<Req
 
         var quests = new ASObject
         {
-            { "QuestComponent", AmfConverter.Convert(user.Quests.Where(q => q.QuestType == QuestType.Active).OrderBy(q => q.Order).Select(x => x.ToDto())) }
+            { "QuestComponent", AmfConverter.Convert(player.Quests.OrderBy(q => q.Order).Select(x => x.ToDto())) }
         };
 
         return new CityVilleResponse().Data(new ASObject { { "questStarted", 1 } }).MetaData(quests);

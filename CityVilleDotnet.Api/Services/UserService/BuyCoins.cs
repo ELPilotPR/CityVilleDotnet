@@ -4,6 +4,7 @@ using CityVilleDotnet.Common.Settings;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Domain.Enums;
 using CityVilleDotnet.Persistence;
+using FluentValidation;
 using FluorineFx;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,21 +12,16 @@ namespace CityVilleDotnet.Api.Services.UserService;
 
 public class BuyCoins(CityVilleDbContext context) : AmfService<BuyCoinsRequest>
 {
-    public override async Task<ASObject> HandlePacket(BuyCoinsRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(BuyCoinsRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var player = await context.Set<User>()
-            .Where(x => x.UserId == userId)
-            .Select(x => x.Player)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (player is null) throw new Exception($"User not found with id {userId}");
-
         var gameItem = GameSettingsManager.Instance.GetItem(request.ItemName);
 
         if (gameItem is null) throw new Exception($"Game item {request.ItemName} not found");
+        if (gameItem.CoinRewards is null) throw new Exception($"Game item {request.ItemName} does not have coinRewards");
 
-        if (gameItem.CoinRewards is null)
-            throw new Exception($"Game item {request.ItemName} does not have coinRewards");
+        var player = await context.Set<Player>().FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
+
+        if (player is null) throw new Exception("User not found");
 
         if (gameItem.Cost is not null && gameItem.Cost > 0)
         {
@@ -53,4 +49,12 @@ public class BuyCoins(CityVilleDbContext context) : AmfService<BuyCoinsRequest>
 public class BuyCoinsRequest
 {
     [AmfParam(0)] public string ItemName { get; set; } = string.Empty;
+}
+
+public class BuyCoinsValidator : AbstractValidator<BuyCoinsRequest>
+{
+    public BuyCoinsValidator()
+    {
+        RuleFor(x => x.ItemName).NotEmpty().MaximumLength(64);
+    }
 }

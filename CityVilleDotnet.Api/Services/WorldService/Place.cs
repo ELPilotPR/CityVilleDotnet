@@ -4,7 +4,6 @@ using CityVilleDotnet.Common.Settings;
 using CityVilleDotnet.Common.Utils;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Domain.Enums;
-using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
 using FluentValidation;
 using FluorineFx;
@@ -15,33 +14,29 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 internal sealed class Place(CityVilleDbContext context, ILogger<Place> logger) : AmfService<PlaceRequest>
 {
-    public override async Task<ASObject> HandlePacket(PlaceRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(PlaceRequest request, Guid playerId, CancellationToken cancellationToken)
     {
         logger.LogDebug("Received place action {@PlaceRequest}", request);
 
         // TODO: Implement components
         // ignore components for now
 
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
             .ThenInclude(x => x.FranchiseLocation)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.SeenFlags)
-            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active).OrderBy(q => q.Order))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.SeenFlags)
+            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Masteries)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new Exception("Can't find user with UserId");
+            .Include(x => x.Masteries)
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken) ?? throw new Exception("Can't find user with UserId");
 
-        if (user.Player is null) throw new Exception($"User not found with id {userId}");
+        if (player is null) throw new Exception("Player not found");
 
-        var world = user.GetWorld();
+        var world = player.GetWorld();
 
         var gameItem = GameSettingsManager.Instance.GetItem(request.Building.ItemName);
 
@@ -92,29 +87,26 @@ internal sealed class Place(CityVilleDbContext context, ILogger<Place> logger) :
                     world.AddBuilding(childObj);
                 }
 
-                if (user.Player!.HasItem(request.Building.ItemName))
+                if (player.HasItem(request.Building.ItemName))
                 {
-                    var removedItem = user.Player.RemoveItem(request.Building.ItemName);
+                    var removedItem = player.RemoveItem(request.Building.ItemName);
 
                     if (removedItem is not null)
                         context.Set<InventoryItem>().Remove(removedItem);
                 }
                 else if (gameItem.Cost is not null)
                 {
-                    user.Player!.RemoveCoins(gameItem.Cost.Value);
+                    player.RemoveCoins(gameItem.Cost.Value);
                 }
 
-                user.HandleQuestsProgress("placeByClass", className: request.Building.ClassName.ToString());
-                user.HandleQuestsProgress("placeBuildingByName", itemName: request.Building.ItemName);
-                user.HandleQuestsProgress("placeByKeyword", itemName: request.Building.ItemName);
-                user.CheckCompletedQuests();
+                player.HandleQuestsProgress("placeByClass", className: request.Building.ClassName.ToString());
+                player.HandleQuestsProgress("placeBuildingByName", itemName: request.Building.ItemName);
+                player.HandleQuestsProgress("placeByKeyword", itemName: request.Building.ItemName);
+                player.CheckCompletedQuests();
 
                 await context.SaveChangesAsync(cancellationToken);
 
-                return new CityVilleResponse().MetaData(new ASObject
-                {
-                    ["QuestComponent"] = AmfConverter.Convert(user.Quests.Select(x => x.ToDto()))
-                });
+                return new CityVilleResponse();
             }
         }
 
@@ -148,9 +140,9 @@ internal sealed class Place(CityVilleDbContext context, ILogger<Place> logger) :
 
         world.AddBuilding(obj);
 
-        if (user.Player!.HasItem(request.Building.ItemName))
+        if (player.HasItem(request.Building.ItemName))
         {
-            var removedItem = user.Player.RemoveItem(request.Building.ItemName);
+            var removedItem = player.RemoveItem(request.Building.ItemName);
 
             if (removedItem is not null)
                 context.Set<InventoryItem>().Remove(removedItem);
@@ -158,11 +150,11 @@ internal sealed class Place(CityVilleDbContext context, ILogger<Place> logger) :
         else
         {
             if (gameItem.Cost is not null)
-                user.Player!.RemoveCoins(gameItem.Cost.Value);
+                player.RemoveCoins(gameItem.Cost.Value);
         }
 
         // Set TempId to current clientId to fix harvest
-        if (request.Building.ClassName == BuildingClassType.Business)
+        if (request.Building.ClassName == BuildingClassType.Business || player.IsNew)
         {
             obj.SetTempId(request.Building.Id);
         }
@@ -170,17 +162,14 @@ internal sealed class Place(CityVilleDbContext context, ILogger<Place> logger) :
         // TODO: Check coins, goods, energy, etc...
         // Add population
 
-        user.HandleQuestsProgress("placeByClass", className: request.Building.ClassName.ToString());
-        user.HandleQuestsProgress("placeBuildingByName", itemName: request.Building.ItemName);
-        user.HandleQuestsProgress("placeByKeyword", itemName: request.Building.ItemName);
-        user.CheckCompletedQuests();
+        player.HandleQuestsProgress("placeByClass", className: request.Building.ClassName.ToString());
+        player.HandleQuestsProgress("placeBuildingByName", itemName: request.Building.ItemName);
+        player.HandleQuestsProgress("placeByKeyword", itemName: request.Building.ItemName);
+        player.CheckCompletedQuests();
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return new CityVilleResponse().MetaData(new ASObject
-        {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Select(x => x.ToDto()))
-        }).Data(new ASObject
+        return new CityVilleResponse().Data(new ASObject
         {
             { "id", obj.WorldFlatId }
         });

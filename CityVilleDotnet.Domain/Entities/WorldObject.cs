@@ -1,8 +1,10 @@
-﻿using CityVilleDotnet.Common.Settings;
+﻿using CityVilleDotnet.Common.Global;
+using CityVilleDotnet.Common.Settings;
 using CityVilleDotnet.Common.Utils;
 using CityVilleDotnet.Domain.EnumExtensions;
 using CityVilleDotnet.Domain.Enums;
 using CityVilleDotnet.Domain.GameEntities;
+using Microsoft.Extensions.Logging;
 
 namespace CityVilleDotnet.Domain.Entities;
 
@@ -138,9 +140,33 @@ public class WorldObject
         return newObjects;
     }
 
+    public bool CanHarvest()
+    {
+        if (GetClassName().IsBusiness())
+            return State == WorldObjectState.ClosedHarvestable;
+
+        return HasGrown();
+    }
+
     public bool HasGrown()
     {
-        return State == WorldObjectState.Planted && PlantTime <= ServerUtils.GetCurrentTime();
+        if (State == WorldObjectState.Grown) return true;
+        if (State != WorldObjectState.Planted || PlantTime is null) return false;
+
+        var currentTime = ServerUtils.GetCurrentTime();
+        var timeElapsed = currentTime - PlantTime.Value;
+
+        var item = GameSettingsManager.Instance.GetItem(GetItemName());
+        var growTime = item?.GetGrowTime();
+
+        if (growTime is null) return false;
+
+        var settings = GameSettingsManager.Instance.GetSettings();
+        var inGameDaySeconds = settings.InGameDaySeconds;
+        var growMultiplier = settings.GrowMultiplier;
+        var growTimeMs = growTime * (inGameDaySeconds * 1000.0) * growMultiplier;
+
+        return timeElapsed >= growTimeMs;
     }
 
     public void SetReadyToHarvest()
@@ -177,11 +203,8 @@ public class WorldObject
             }
         }
 
-        // Update state to planted if it was grown
-        if (HasGrown()) SetReadyToHarvest();
-
         // This is harvesting Residence
-        if (State == WorldObjectState.Grown)
+        if (HasGrown())
         {
             State = WorldObjectState.Planted;
             PlantTime = ServerUtils.GetCurrentTime();
@@ -189,11 +212,6 @@ public class WorldObject
 
         if (ClassName.IsBusiness())
         {
-            if (State != WorldObjectState.ClosedHarvestable)
-            {
-                throw new Exception("Can't harvest business building that is not harvestable");
-            }
-
             State = WorldObjectState.Closed;
             Visits = 0;
         }
@@ -308,7 +326,7 @@ public class WorldObject
         State = EnumExtensions.EnumExtensions.ParseFromDescription<WorldObjectState>(worldObjectDto.State);
         TargetBuildingClass = worldObjectDto.TargetBuildingClass is null ? null : Enum.Parse<BuildingClassType>(worldObjectDto.TargetBuildingClass);
         TargetBuildingName = worldObjectDto.TargetBuildingName;
-        TempId = worldObjectDto.TempId;
+        TempId = -1;
         WorldFlatId = worldObjectDto.WorldFlatId;
 
         return this;
@@ -337,7 +355,7 @@ public class WorldObject
     {
         if (TargetBuildingName is not null)
             return TargetBuildingName;
-        
+
         if (ContractName is not null)
             return ContractName;
 
@@ -364,5 +382,38 @@ public class WorldObject
         if (BuiltFloorCount is null) throw new Exception("Floor count can't be null for Headquarters");
 
         BuiltFloorCount++;
+    }
+
+    public void BoostPlot()
+    {
+        if (GetClassName() != BuildingClassType.Plot)
+            throw new Exception($"Can't water {ClassName}");
+
+        var item = GameSettingsManager.Instance.GetItem(GetItemName());
+        var growTime = item?.GetGrowTime();
+
+        if (growTime is null) throw new Exception("Building can't be watered without growTime");
+
+        var settings = GameSettingsManager.Instance.GetSettings();
+        var inGameDaySeconds = settings.InGameDaySeconds;
+        var growMultiplier = settings.GrowMultiplier;
+        var boostGrowMultiplier = settings.BoostGrowMultiplier;
+        //var boostGrowInstantHourLimit = settings.BoostGrowInstantHourLimit; // TODO
+
+        var visitBoost = growTime * (inGameDaySeconds * 1000) * growMultiplier * boostGrowMultiplier;
+
+        PlantTime -= visitBoost;
+
+        if (HasGrown()) SetReadyToHarvest();
+    }
+
+    public void SetDirection(int direction)
+    {
+        Direction = direction;
+    }
+
+    public WorldObject Clone(int x, int y, int z, int id)
+    {
+        return new WorldObject(ItemName, ClassName, ContractName, Deleted, TempId, State, Direction, ServerUtils.GetCurrentTime(), ServerUtils.GetCurrentTime(), x, y, z ,id);
     }
 }

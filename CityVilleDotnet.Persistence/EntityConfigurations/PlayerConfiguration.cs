@@ -26,10 +26,8 @@ public class PlayerConfiguration : IEntityTypeConfiguration<Player>
         builder.Property(x => x.RollCounter);
         builder.Property(x => x.Username).HasMaxLength(32);
 
-        // TODO: Implement these
-        builder.Ignore(x => x.PlayerNews);
-        builder.Ignore(x => x.Wishlist);
-
+        builder.HasMany(x => x.Quests).WithOne();
+        builder.HasOne(x => x.World);
         builder.HasMany(x => x.InventoryItems).WithOne();
         builder.HasMany(x => x.SeenFlags);
         builder.HasMany(x => x.Licenses);
@@ -40,5 +38,7 @@ public class PlayerConfiguration : IEntityTypeConfiguration<Player>
             .WithOne()
             .IsRequired(true)
             .OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(x => x.Friends);
+        builder.HasOne(x => x.AppUser);
     }
 }

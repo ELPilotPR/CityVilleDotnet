@@ -3,10 +3,11 @@ using CityVilleDotnet.Api.Services.FarmService;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Factory.InventoryItem;
 using CityVilleDotnet.Factory.MapRect;
-using CityVilleDotnet.Factory.User;
+using CityVilleDotnet.Factory.Player;
 using CityVilleDotnet.Factory.World;
 using CityVilleDotnet.Test.Integration.Fixtures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CityVilleDotnet.Test.Integration.FarmService;
 
@@ -21,13 +22,13 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
     {
         var permit = Faker.InventoryItem(itemName: "permits", amount: 5);
         var world = Faker.World();
-        var user = Faker.User(world: world);
-        user.Player!.InventoryItems.Add(permit);
+        var user = Faker.Player(world: world);
+        user.InventoryItems.Add(permit);
 
         await Context.AddAsync(user);
         await Context.SaveChangesAsync();
 
-        var handler = new ExpandCity(Context);
+        var handler = new ExpandCity(Context, NullLogger<ExpandCity>.Instance);
         var request = new ExpandCityRequest
         {
             ItemName = ExpansionItemName,
@@ -39,7 +40,7 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
             ]
         };
 
-        var response = await handler.HandlePacket(request, user.UserId, CancellationToken.None);
+        var response = await handler.HandlePacket(request, user.Id, CancellationToken.None);
 
         response["errorType"].Should().Be(0);
 
@@ -59,10 +60,7 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
 
         trees.Should().HaveCount(2);
 
-        var updatedPlayer = await Context.Set<User>()
-            .Where(u => u.UserId == user.UserId)
-            .Select(u => u.Player)
-            .FirstAsync();
+        var updatedPlayer = await Context.Set<Player>().FirstOrDefaultAsync(u => u.Id == user.Id);
 
         updatedPlayer!.ExpansionsPurchased.Should().Be(1);
 
@@ -78,13 +76,13 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
     {
         var permit = Faker.InventoryItem(itemName: "permits", amount: 5);
         var world = Faker.World();
-        var user = Faker.User(world: world);
-        user.Player!.InventoryItems.Add(permit);
+        var user = Faker.Player(world: world);
+        user.InventoryItems.Add(permit);
 
         await Context.AddAsync(user);
         await Context.SaveChangesAsync();
 
-        var handler = new ExpandCity(Context);
+        var handler = new ExpandCity(Context, NullLogger<ExpandCity>.Instance);
         var request = new ExpandCityRequest
         {
             ItemName = ExpansionItemName,
@@ -92,7 +90,7 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
             Trees = []
         };
 
-        var response = await handler.HandlePacket(request, user.UserId, CancellationToken.None);
+        var response = await handler.HandlePacket(request, user.Id, CancellationToken.None);
 
         response["errorType"].Should().Be(0);
 
@@ -111,12 +109,12 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
     public async Task ExpandCity_NotEnoughPermits_ThrowsException()
     {
         var world = Faker.World();
-        var user = Faker.User(world: world);
+        var user = Faker.Player(world: world);
 
         await Context.AddAsync(user);
         await Context.SaveChangesAsync();
 
-        var handler = new ExpandCity(Context);
+        var handler = new ExpandCity(Context, NullLogger<ExpandCity>.Instance);
         var request = new ExpandCityRequest
         {
             ItemName = ExpansionItemName,
@@ -124,34 +122,9 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
             Trees = []
         };
 
-        var act = () => handler.HandlePacket(request, user.UserId, CancellationToken.None);
+        var act = () => handler.HandlePacket(request, user.Id, CancellationToken.None);
 
         await act.Should().ThrowAsync<Exception>().WithMessage("*permits*");
-    }
-
-    [Fact]
-    public async Task ExpandCity_MapRectAlreadyExists_ThrowsException()
-    {
-        var existingMapRect = Faker.MapRect(x: 40, y: 40, width: 18, height: 18);
-        var permit = Faker.InventoryItem(itemName: "permits", amount: 5);
-        var world = Faker.World(mapRects: [existingMapRect]);
-        var user = Faker.User(world: world);
-        user.Player!.InventoryItems.Add(permit);
-
-        await Context.AddAsync(user);
-        await Context.SaveChangesAsync();
-
-        var handler = new ExpandCity(Context);
-        var request = new ExpandCityRequest
-        {
-            ItemName = ExpansionItemName,
-            Coordinates = new ExpandCityCoordinates { X = 40, Y = 40 },
-            Trees = []
-        };
-
-        var act = () => handler.HandlePacket(request, user.UserId, CancellationToken.None);
-
-        await act.Should().ThrowAsync<Exception>().WithMessage("*already exist*");
     }
 
     [Fact]
@@ -159,13 +132,13 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
     {
         var permit = Faker.InventoryItem(itemName: "permits", amount: 5);
         var world = Faker.World();
-        var user = Faker.User(world: world);
-        user.Player!.InventoryItems.Add(permit);
+        var user = Faker.Player(world: world);
+        user.InventoryItems.Add(permit);
 
         await Context.AddAsync(user);
         await Context.SaveChangesAsync();
 
-        var handler = new ExpandCity(Context);
+        var handler = new ExpandCity(Context, NullLogger<ExpandCity>.Instance);
         var request = new ExpandCityRequest
         {
             ItemName = "unknown",
@@ -173,7 +146,7 @@ public class ExpandCityTest(DatabaseFixture fixture) : IntegrationTest(fixture)
             Trees = []
         };
 
-        var act = () => handler.HandlePacket(request, user.UserId, CancellationToken.None);
+        var act = () => handler.HandlePacket(request, user.Id, CancellationToken.None);
 
         await act.Should().ThrowAsync<Exception>().WithMessage("*Can't find item*");
     }

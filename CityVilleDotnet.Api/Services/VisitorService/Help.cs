@@ -11,64 +11,64 @@ namespace CityVilleDotnet.Api.Services.VisitorService;
 
 public class Help(CityVilleDbContext context, ILogger<Help> logger) : AmfService<HelpRequest>
 {
-    public override async Task<ASObject> HandlePacket(HelpRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(HelpRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        logger.LogDebug("Received visitor help from {UserId}: {RequestName} {RequestType}", userId, request.Name, request.Type);
+        logger.LogDebug("Received visitor help from {UserId}: {RequestName} {RequestType}", playerId, request.Name, request.Type);
 
         // TODO: Improve this query
-        var currentUser = await context.Set<User>()
+        var currentUser = await context.Set<Player>()
             .AsSplitQuery()
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.VisitorHelpOrders)
+            .Include(x => x!.VisitorHelpOrders)
             .Include(x => x.Friends)
-            .ThenInclude(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
+            .ThenInclude(x => x.FriendPlayer)
             .ThenInclude(x => x!.VisitorHelpOrders)
             .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
             .Include(x => x.Friends)
-            .ThenInclude(x => x.FriendUser)
+            .ThenInclude(x => x.FriendPlayer)
             .ThenInclude(x => x.World)
             .ThenInclude(x => x!.Objects.Where(o => request.HelpParams.HelpTargets.Contains(o.WorldFlatId)))
-            
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (currentUser?.Player is null)
-            throw new Exception($"Can't find user with userId {userId}");
+        if (currentUser is null)
+            throw new Exception("Player not found");
 
         var reputation = 0;
         var coins = 0;
         var goods = 0;
 
+        var settings = GameSettingsManager.Instance.GetSettings();
+
         switch (request.Type)
         {
             case "residenceCollectRent":
-                reputation = GameSettingsManager.Instance.GetInt("FriendVisitResidenceRepGain");
-                coins = GameSettingsManager.Instance.GetInt("FriendHelpDefaultCoinReward");
+                reputation = settings.FriendVisitResidenceRepGain;
+                coins = settings.FriendHelpDefaultCoinReward;
                 break;
             case "wildernessClear":
-                reputation = GameSettingsManager.Instance.GetInt("FriendVisitWildernessRepGain");
-                coins = GameSettingsManager.Instance.GetInt("FriendHelpDefaultCoinReward");
+                reputation = settings.FriendVisitWildernessRepGain;
+                coins = settings.FriendHelpDefaultCoinReward;
                 break;
             case "businessSendTour":
-                reputation = GameSettingsManager.Instance.GetInt("FriendVisitBusinessRepGain");
-                coins = GameSettingsManager.Instance.GetInt("FriendHelpDefaultCoinReward");
+                reputation = settings.FriendVisitBusinessRepGain;
+                coins = settings.FriendHelpDefaultCoinReward;
                 break;
             case "plotHarvest":
-                reputation = GameSettingsManager.Instance.GetInt("FriendVisitPlotRepGain");
-                goods = GameSettingsManager.Instance.GetInt("FriendHelpDefaultGoodsReward");
+            case "plotWater":
+                reputation = settings.FriendVisitPlotRepGain;
+                goods = settings.FriendHelpDefaultGoodsReward;
                 break;
             default:
                 throw new Exception($"Not implemented help type {request.Type}");
         }
-        
-        var targetFriend = currentUser.Friends.FirstOrDefault(x => x.FriendUser.Player!.Snuid == Convert.ToInt32(request.HelpParams.RecipientId));
 
-        if (targetFriend?.FriendUser.Player is null) throw new Exception($"Can't find friend with recipientId {request.HelpParams.RecipientId}");
+        var targetFriend = currentUser.Friends.FirstOrDefault(x => x.FriendPlayer.Snuid == Convert.ToInt32(request.HelpParams.RecipientId));
+
+        if (targetFriend?.FriendPlayer is null) throw new Exception($"Can't find friend with recipientId {request.HelpParams.RecipientId}");
         if (targetFriend.EnergyLeft <= 0) return GatewayService.CreateEmptyResponse();
-        
+
         currentUser.HandleQuestsProgress("visitorHelp", request.Type);
-        
-        var world = targetFriend.FriendUser.GetWorld();
+
+        var world = targetFriend.FriendPlayer.GetWorld();
 
         if (request.Type == "businessSendTour")
         {
@@ -86,9 +86,9 @@ public class Help(CityVilleDbContext context, ILogger<Help> logger) : AmfService
             }
         }
 
-        currentUser.Player.AddCoins(coins);
-        currentUser.Player.AddGoods(goods);
-        currentUser.Player.AddSocialXp(reputation);
+        currentUser.AddCoins(coins);
+        currentUser.AddGoods(goods);
+        currentUser.AddSocialXp(reputation);
 
         targetFriend.EnergyLeft -= 1;
 
@@ -96,7 +96,7 @@ public class Help(CityVilleDbContext context, ILogger<Help> logger) : AmfService
 
         // Create batch visitor help order
         // Order reset with energy reset or if the batch is accepted
-        var senderHelpOrder = currentUser.Player.VisitorHelpOrders.FirstOrDefault(x =>
+        var senderHelpOrder = currentUser.VisitorHelpOrders.FirstOrDefault(x =>
             x.TransmissionStatus == TransmissionStatus.Sent &&
             x.OrderState == OrderState.Pending &&
             x.Status == VisitorHelpStatus.Unclaimed &&
@@ -124,7 +124,7 @@ public class Help(CityVilleDbContext context, ILogger<Help> logger) : AmfService
             senderHelpOrder.HelpTargets = senderHelpOrder.HelpTargets.Concat(request.HelpParams.HelpTargets).ToArray();
         }
 
-        var receiveHelpOrder = targetFriend.FriendUser.Player.VisitorHelpOrders.FirstOrDefault(x =>
+        var receiveHelpOrder = targetFriend.FriendPlayer.VisitorHelpOrders.FirstOrDefault(x =>
             x.TransmissionStatus == TransmissionStatus.Received &&
             x.OrderState == OrderState.Pending &&
             x.Status == VisitorHelpStatus.Unclaimed &&
@@ -154,8 +154,8 @@ public class Help(CityVilleDbContext context, ILogger<Help> logger) : AmfService
 
         if (newOrder)
         {
-            targetFriend.FriendUser.Player!.AddVisitorHelpOrder(receiveHelpOrder);
-            currentUser.Player.AddVisitorHelpOrder(senderHelpOrder);
+            targetFriend.FriendPlayer.AddVisitorHelpOrder(receiveHelpOrder);
+            currentUser.AddVisitorHelpOrder(senderHelpOrder);
         }
 
         await context.SaveChangesAsync(cancellationToken);

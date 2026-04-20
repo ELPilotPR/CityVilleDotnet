@@ -10,48 +10,50 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CityVilleDotnet.Api.Services.FarmService;
 
-public class ExpandCity(CityVilleDbContext context) : AmfService<ExpandCityRequest>
+public class ExpandCity(CityVilleDbContext context, ILogger<ExpandCity> logger) : AmfService<ExpandCityRequest>
 {
     private const string PermitName = "permits";
 
-    public override async Task<ASObject> HandlePacket(ExpandCityRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(ExpandCityRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
-            .AsSplitQuery()
-            .Include(x => x.Player)
-            .Include(x => x.World)
-            .ThenInclude(x => x!.MapRects.Where(m => m.X == request.Coordinates.X && m.Y == request.Coordinates.Y))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
-
-        if (user?.Player is null) throw new Exception("Can't find user");
-
         var item = GameSettingsManager.Instance.GetItem(request.ItemName);
 
         if (item is null) throw new Exception($"Can't find item {request.ItemName}");
         if (item.Height is null || item.Width is null) throw new Exception($"Item {request.ItemName} has no height or width defined");
 
-        var permitData = user.Player.GetExpansionData();
+        var player = await context.Set<Player>()
+            .AsSplitQuery()
+            .Include(x => x.World)
+            .ThenInclude(x => x!.MapRects)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
+
+        if (player is null) throw new Exception("Can't find player");
+
+        var permitData = player.GetExpansionData();
 
         if (permitData is null) throw new Exception("Can't find permit data");
 
         var requiredPermit = permitData[1];
 
-        if (user.Player.CountInventoryItem(PermitName) < requiredPermit)
+        if (player.CountInventoryItem(PermitName) < requiredPermit)
             throw new Exception($"You need {requiredPermit} {PermitName} to expand this city");
 
-        var world = user.GetWorld();
+        var world = player.GetWorld();
 
-        if (world.MapRects.Count > 0) throw new Exception("Map expansion already exist");
-
+        if (world.MapRects.Any(m => m.X == request.Coordinates.X && m.Y == request.Coordinates.Y))
+        {
+            logger.LogError("Map expansion already exist {PlayerSnuid} {MapRectsCount} | {CoordinatesX} {CoordinatesY}", player.Snuid, world.MapRects.Count, request.Coordinates.X, request.Coordinates.Y);
+            return new CityVilleResponse();
+        }
+        
         var newMapRect = new MapRect
         {
             X = request.Coordinates.X,
             Y = request.Coordinates.Y,
-            Height = int.Parse(item.Height), // FIXME: Change these value to the right type when loading the settings
-            Width = int.Parse(item.Width)
+            Height = item.Height.Value,
+            Width = item.Width.Value
         };
 
         world.AddMapRect(newMapRect);
@@ -85,16 +87,16 @@ public class ExpandCity(CityVilleDbContext context) : AmfService<ExpandCityReque
             });
         }
 
-        user.Player.IncrementExpansionsPurchased();
-        var removedItem = user.Player.RemoveItem(PermitName, requiredPermit);
+        player.IncrementExpansionsPurchased();
+        var removedItem = player.RemoveItem(PermitName, requiredPermit);
 
         if (removedItem is not null)
             context.Set<InventoryItem>().Remove(removedItem);
 
-        user.HandleQuestsProgress("incrementalExpansionCount");
-        user.HandleQuestsProgress("expand");
+        player.HandleQuestsProgress("incrementalExpansionCount");
+        player.HandleQuestsProgress("expand");
 
-        user.CheckCompletedQuests();
+        player.CheckCompletedQuests();
 
         await context.SaveChangesAsync(cancellationToken);
 

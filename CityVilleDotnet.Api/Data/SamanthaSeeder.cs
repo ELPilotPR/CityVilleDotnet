@@ -21,14 +21,13 @@ public static class SamanthaSeeder
 
         logger.LogInformation("Seeding Samantha's city");
 
-        var samanthaUser = await context.Set<User>()
+        var samanthaUser = await context.Set<Player>()
             .AsSplitQuery()
-            .Include(u => u.Player)
             .Include(u => u.World)
             .ThenInclude(w => w!.Objects)
             .Include(u => u.World)
             .ThenInclude(w => w!.MapRects)
-            .FirstOrDefaultAsync(u => u.UserId == SamanthaUserId);
+            .FirstOrDefaultAsync(u => u.Snuid == SamanthaSnuid);
 
         var mapRects = GetMapRects();
         var objects = GetWorldObjects();
@@ -36,19 +35,16 @@ public static class SamanthaSeeder
         if (samanthaUser is not null)
         {
             if (samanthaUser.World is not null)
-                context.Remove(samanthaUser.World);
+                context.Remove(samanthaUser.GetWorld());
 
             var world = new World("City Sam", 36, 36, 0, 0, 0, 0, 0, mapRects, objects);
             samanthaUser.SetWorld(world);
 
-            var player = samanthaUser.Player!;
-            player.SetLevel(80);
+            samanthaUser.SetLevel(80);
 
             world.CalculatePopulation();
 
             await context.SaveChangesAsync();
-            
-            await AddSamanthaToExistingUsers(context, logger);
 
             logger.LogInformation("Samantha's city seeded successfully");
             return;
@@ -63,16 +59,15 @@ public static class SamanthaSeeder
         };
 
         var newWorld = new World("City Sam", 36, 36, 0, 0, 0, 0, 0, mapRects, objects);
-        var user = new User(SamanthaUserId, appUser, "Sam", newWorld);
-
-        var newPlayer = user.Player!;
+        var newPlayer = new Player(appUser, newWorld);
+        
         newPlayer.Snuid = SamanthaSnuid;
         newPlayer.CompleteTutorial();
         newPlayer.SetLevel(80);
 
         newWorld.CalculatePopulation();
 
-        await context.AddAsync(user);
+        await context.AddAsync(newPlayer);
 
         var connection = context.Database.GetDbConnection();
         await connection.OpenAsync();
@@ -87,35 +82,6 @@ public static class SamanthaSeeder
         await transaction.CommitAsync();
 
         logger.LogInformation("Samantha's city seeded successfully");
-    }
-
-    private static async Task AddSamanthaToExistingUsers(CityVilleDbContext context, ILogger logger)
-    {
-        var samantha = await context.Set<User>()
-            .Include(u => u.Friends)
-            .FirstOrDefaultAsync(u => u.UserId == SamanthaUserId);
-
-        if (samantha is null) return;
-
-        var usersWithoutSamantha = await context.Set<User>()
-            .Include(u => u.Friends)
-            .Where(u => u.UserId != SamanthaUserId && !u.Friends.Any(f => f.FriendUser.UserId == SamanthaUserId))
-            .ToListAsync();
-
-        if (usersWithoutSamantha.Count == 0) return;
-
-        foreach (var user in usersWithoutSamantha)
-        {
-            var friendship1 = new Friend(samantha, user, true) { Status = FriendshipStatus.Accepted };
-            var friendship2 = new Friend(user, samantha, false) { Status = FriendshipStatus.Accepted };
-
-            samantha.Friends.Add(friendship1);
-            user.Friends.Add(friendship2);
-        }
-
-        await context.SaveChangesAsync();
-
-        logger.LogInformation("Added Samantha as friend to {Count} existing user(s)", usersWithoutSamantha.Count);
     }
 
     private static List<MapRect> GetMapRects()

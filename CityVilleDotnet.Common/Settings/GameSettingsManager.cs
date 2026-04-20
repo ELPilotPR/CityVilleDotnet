@@ -13,7 +13,7 @@ public class GameSettingsManager
     private readonly Dictionary<string, RandomModifierTable> _randomModifiers;
     private readonly Dictionary<string, RandomModifierPack> _randomModifierPacks;
     private readonly Dictionary<string, WorldRectItem> _worldRects;
-    private Dictionary<string, object> _settings;
+    private FarmingSettings _farmSettings;
     private List<LevelItem> _levels = [];
     private List<ReputationItem> _reputationLevels = [];
     private List<CollectionSetting> _collections = [];
@@ -26,7 +26,6 @@ public class GameSettingsManager
         _randomModifiers = new Dictionary<string, RandomModifierTable>();
         _randomModifierPacks = new Dictionary<string, RandomModifierPack>();
         _worldRects = new Dictionary<string, WorldRectItem>();
-        _settings = new Dictionary<string, object>();
         _isInitialized = false;
     }
 
@@ -102,8 +101,7 @@ public class GameSettingsManager
 
             _levels = gameSettings.Levels.Levels;
             _reputationLevels = gameSettings.Reputation.Levels;
-
-            _settings = gameSettings.Farming.ToDictionary();
+            _farmSettings = gameSettings.Farming;
 
             foreach (var collection in gameSettings.Collections.Collections)
             {
@@ -166,16 +164,6 @@ public class GameSettingsManager
         return _reputationLevels.AsReadOnly();
     }
 
-    public int GetInt(string name)
-    {
-        return (int)_settings[name];
-    }
-
-    public double GetDouble(string name)
-    {
-        return (double)_settings[name];
-    }
-
     public string? GetCollectionByItemName(string itemName)
     {
         if (!_isInitialized)
@@ -211,5 +199,10 @@ public class GameSettingsManager
     public IReadOnlyCollection<ExpansionSetting> GetExpansions()
     {
         return _expansions.AsReadOnly();
+    }
+
+    public FarmingSettings GetSettings()
+    {
+        return _farmSettings;
     }
 }

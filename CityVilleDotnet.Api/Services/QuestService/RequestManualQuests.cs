@@ -11,21 +11,20 @@ namespace CityVilleDotnet.Api.Services.QuestService;
 
 public class RequestManualQuests(CityVilleDbContext context, ILogger<RequestManualQuests> logger) : AmfService<RequestManualQuestsRequest>
 {
-    public override async Task<ASObject> HandlePacket(RequestManualQuestsRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(RequestManualQuestsRequest request, Guid playerId, CancellationToken cancellationToken)
     {
         if (request.Quests is null || request.Quests.Length == 0)
             return GatewayService.CreateEmptyResponse();
 
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.Quests)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
+            .Include(x => x!.InventoryItems)
             .Include(x => x.World)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user?.Player is null || user.World is null)
-            throw new Exception($"User {userId} not found");
+        if (player is null)
+            throw new Exception("Player not found");
 
         var results = new List<ASObject>();
 
@@ -39,13 +38,13 @@ public class RequestManualQuests(CityVilleDbContext context, ILogger<RequestManu
                 continue;
             }
 
-            if (user.Quests.Any(x => x.Name == questName)) continue;
+            if (player.Quests.Any(x => x.Name == questName)) continue;
 
-            if (questItem.RequiredLevel is not null && user.Player.Level < questItem.RequiredLevel) continue;
-            if (questItem.RequiredPopulation is not null && user.World.Population < questItem.RequiredPopulation) continue;
+            if (questItem.RequiredLevel is not null && player.Level < questItem.RequiredLevel) continue;
+            if (questItem.RequiredPopulation is not null && player.GetWorld().Population < questItem.RequiredPopulation) continue;
 
             var newQuest = Quest.Create(questName, questItem.Tasks.Tasks.Count, QuestType.Active);
-            user.Quests.Add(newQuest);
+            player.Quests.Add(newQuest);
 
             logger.LogDebug("Starting quest {QuestName}", questName);
 
@@ -57,7 +56,7 @@ public class RequestManualQuests(CityVilleDbContext context, ILogger<RequestManu
                 {
                     if (function.Name == "grantItemOnInit")
                     {
-                        user.Player.AddItem(function.ItemName);
+                        player.AddItem(function.ItemName);
                         priceGranted = true;
                     }
                 }
@@ -71,7 +70,7 @@ public class RequestManualQuests(CityVilleDbContext context, ILogger<RequestManu
                 {
                     foreach (var item in itemsToGive)
                     {
-                        user.Player.AddItem(item);
+                        player.AddItem(item);
                     }
                 }
             }

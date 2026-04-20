@@ -9,15 +9,15 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 public sealed class SetCurrentThemes(CityVilleDbContext context) : AmfService<SetCurrentThemesRequest>
 {
-    public override async Task<ASObject> HandlePacket(SetCurrentThemesRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(SetCurrentThemesRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .Include(x => x.World)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user is null) throw new Exception($"User not found with id {userId}");
+        if (player is null) throw new Exception("Player not found");
 
-        var world = user.GetWorld();
+        var world = player.GetWorld();
 
         world.UpdateTheme(request.ThemeName, request.Enabled);
 

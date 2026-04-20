@@ -1,3 +1,4 @@
+using System.Globalization;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -14,7 +15,11 @@ namespace CityVilleDotnet.Api.Pages;
 [Authorize]
 public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbContext dbContext, IConfiguration configuration) : PageModel
 {
-    public static List<string> PreloadAssets = ["road/city/city04_SE.png", "dialogs/MarketAssets.swf", "dialogs/Market3Assets.swf", "dialogs/ASwingAssets.swf", "dialogs/ScrollingListAssets.swf", "dialogs/InventoryAssets.swf", "dialogs/QuestAssets.swf", "dialogs/TooltipAssets.swf", "dialogs/PopulationAssets.swf"];
+    public static List<string> PreloadAssets =
+    [
+        "dialogs/MarketAssets.swf", "dialogs/Market3Assets.swf", "dialogs/ASwingAssets.swf", "dialogs/ScrollingListAssets.swf", "dialogs/InventoryAssets.swf", "dialogs/QuestAssets.swf",
+        "dialogs/TooltipAssets.swf", "dialogs/PopulationAssets.swf"
+    ];
 
     public string FriendList { get; set; } = "[]";
     public string Uid { get; set; } = "333";
@@ -31,23 +36,22 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         if (currentUser is null)
             return RedirectToPage("/Account/Login");
 
-        var user = await dbContext.Set<User>()
+        var user = await dbContext.Set<Player>()
             .AsNoTracking()
             .Include(x => x.AppUser)
-            .Include(x => x.Friends)
-            .ThenInclude(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
-            .Include(x => x.Player)
+            .Include(x => x!.Friends)
+            .ThenInclude(x => x.FriendPlayer)
             .FirstOrDefaultAsync(x => x.AppUser!.Id.Equals(currentUser.Id));
 
         ServerTime = ServerUtils.GetCurrentTime();
 
-        if (user?.Player is not null)
+        if (user is not null)
         {
-            Uid = user.Player.Snuid.ToString();
-            UserName = user.Player.Username;
-            Level = user.Player.Level;
-            FriendList = JsonSerializer.Serialize(user.GetSocialNetworkUserFriendsList($"{Request.Scheme}://{Request.Host}{Request.PathBase}"), new JsonSerializerOptions { WriteIndented = false, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            Uid = user.Snuid.ToString();
+            UserName = user.Username;
+            Level = user.Level;
+            FriendList = JsonSerializer.Serialize(user.GetSocialNetworkUserFriendsList($"{Request.Scheme}://{Request.Host}{Request.PathBase}"),
+                new JsonSerializerOptions { WriteIndented = false, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         }
         else
         {
@@ -62,6 +66,8 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
 
     public string BuildFlashVars()
     {
+        var locale = CultureInfo.CurrentCulture.Name.Replace("-", "_");
+        
         var flashVars = new Dictionary<string, string>()
         {
             ["optimizePreloader"] = "true",
@@ -84,7 +90,7 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             ["quest_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/questSettings.xml",
             ["effects_config_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/effectsConfig.xml",
             ["font_mapper_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/FontMapper.swf",
-            ["localization_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/lang/locale_en_US.swf",
+            ["localization_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/lang/locale_{locale}.swf",
             ["bootstrap_config_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/bootstrap.xml",
             ["amf_settings_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/settings.amf.z",
             ["embedded_art_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/EmbeddedArt.swf",
@@ -94,7 +100,7 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             ["asset_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/assets/",
             ["preloaded_asset_urls"] = string.Join(",", PreloadAssets.Select(x => $"{Request.Scheme}://{Request.Host}{Request.PathBase}/assets/{x}")),
             ["pollTimeSeconds"] = "1",
-            ["locale"] = "en_US",
+            ["locale"] = locale,
         };
 
         foreach (var param in Request.Query)
@@ -102,7 +108,17 @@ public class GameModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             flashVars[param.Key] = param.Value.ToString();
         }
 
-        if (!Request.Query.ContainsKey("disableCache"))
+        if (Request.Query.ContainsKey("rev"))
+        {
+            var revision = Request.Query["rev"].ToString();
+            
+            flashVars["swfLocation"] = $"Game_rev{revision}.swf";
+            flashVars["game_config_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/gameSettings_rev{revision}.xml";
+            flashVars["quest_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/questSettings_rev{revision}.xml";
+            flashVars["amf_settings_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/settings_rev{revision}.amf.z";
+        }
+
+        if (!Request.Query.ContainsKey("disableCache") && !Request.Query.ContainsKey("rev"))
         {
             flashVars["zcache_gameswf_gamesettings"] = "true";
             flashVars["zcache_url"] = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/zcache/ZCache.swf";

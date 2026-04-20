@@ -1,6 +1,5 @@
 ﻿using CityVilleDotnet.Api.Common.Amf;
 using CityVilleDotnet.Domain.Entities;
-using CityVilleDotnet.Domain.Enums;
 using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
 using FluorineFx;
@@ -10,29 +9,28 @@ namespace CityVilleDotnet.Api.Services.QuestService;
 
 public class HandleQuestProgress(CityVilleDbContext context) : AmfService<HandleQuestProgressRequest>
 {
-    public override async Task<ASObject> HandlePacket(HandleQuestProgressRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(HandleQuestProgressRequest request, Guid playerId, CancellationToken cancellationToken)
     {
         // params
         // 0: action type (onValidCityName)
 
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
-            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active).OrderBy(q => q.Order))
-            .Include(x => x.Player)
+            .Include(x => x.Quests.OrderBy(q => q.Order))
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user is null) throw new Exception("Can't to find user with UserId");
+        if (player is null) throw new Exception("Can't to find user with UserId");
 
-        user.HandleQuestsProgress(request.ActionType);
-        user.CheckCompletedQuests();
+        player.HandleQuestsProgress(request.ActionType);
+        player.CheckCompletedQuests();
 
         await context.SaveChangesAsync(cancellationToken);
 
         var rep = new ASObject
         {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Select(x => x.ToDto()))
+            ["QuestComponent"] = AmfConverter.Convert(player.Quests.Select(x => x.ToDto()))
         };
 
         return new CityVilleResponse().MetaData(rep);
