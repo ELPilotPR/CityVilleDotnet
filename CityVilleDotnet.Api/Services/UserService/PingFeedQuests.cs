@@ -10,17 +10,16 @@ namespace CityVilleDotnet.Api.Services.UserService;
 
 internal sealed class PingFeedQuests(CityVilleDbContext context) : AmfService
 {
-    public override async Task<ASObject> HandlePacket(object[] @params, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(object[] @params, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var user = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.Quests)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new Exception("Can't to find user with UserId");
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken) ?? throw new Exception("Player not found");
 
         user.HandleQuestsProgress("");
         user.CheckCompletedQuests();
@@ -29,7 +28,7 @@ internal sealed class PingFeedQuests(CityVilleDbContext context) : AmfService
 
         return new CityVilleResponse().MetaData(new ASObject
         {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Where(x => x.QuestType == QuestType.Active).Select(x => x.ToDto()).ToList())
+            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Select(x => x.ToDto()).ToList())
         });
     }
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
@@ -31,20 +32,19 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             return RedirectToPage("/Game");
         }
 
-        Friends = await dbContext.Set<User>()
+        Friends = await dbContext.Set<Player>()
             .AsNoTracking()
             .Where(x => x.AppUser!.Id.Equals(CurrentUser.Id))
             .Include(x => x.AppUser)
             .Include(x => x.Friends)
-            .ThenInclude(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
+            .ThenInclude(x => x.FriendPlayer)
             .SelectMany(x => x.Friends, (_, friend) => friend)
-            .Where(x => x.FriendUser.Player!.Snuid != -1) // Remove samantha
+            .Where(x => x.FriendPlayer!.Snuid != -1) // Remove samantha
             .Select(x => x.ToDto())
             .ToListAsync(ct);
 
-        ViewData["PlayerName"] = user.Player?.Username;
-        ViewData["PlayerLevel"] = user.Player?.Level;
+        ViewData["PlayerName"] = user.Username;
+        ViewData["PlayerLevel"] = user.Level;
 
         return Page();
     }
@@ -57,54 +57,35 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
             return RedirectToPage("/Friends/List");
         }
 
-        var user = await GetCurrentUserAsync(ct);
+        var player = await GetCurrentUserAsync(ct);
 
-        if (user?.Player is null || user.AppUser is null)
+        if (player?.AppUser is null)
             return RedirectToPage("/Account/Login");
 
-        CurrentUser = user.AppUser;
+        CurrentUser = player.AppUser;
 
-        if (CurrentUser.IsGuest)
-        {
-            return RedirectToPage("/Game");
-        }
+        if (CurrentUser.IsGuest) return RedirectToPage("/Game");
 
-        if (user.Player.Username.Equals(Username, StringComparison.OrdinalIgnoreCase))
-        {
-            TempData["Error"] = "You cannot add yourself as a friend.";
-            return RedirectToPage("/Friends/List");
-        }
+        var targetPlayer = await dbContext.Set<Player>().FirstOrDefaultAsync(x => x.Username == Username, ct);
 
-        var targetUser = await dbContext.Set<User>()
-            .Include(x => x.Player)
-            .Where(x => x.Player!.Username == Username)
-            .FirstOrDefaultAsync(ct);
-
-        if (targetUser is null)
+        if (targetPlayer is null)
         {
             TempData["Error"] = "User not found.";
             return RedirectToPage("/Friends/List");
         }
 
-        var existingFriendship = await dbContext.Set<Friend>()
-            .AnyAsync(x => x.User.Id == user.Id && x.FriendUser.Id == targetUser.Id, ct);
-
-        if (existingFriendship)
+        if (player.HasFriend(targetPlayer))
         {
             TempData["Error"] = "This user is already in your friend list.";
             return RedirectToPage("/Friends/List");
         }
 
-        var friendship1 = new Friend(targetUser, user, true);
-        var friendship2 = new Friend(user, targetUser, false);
-
-        targetUser.Friends.Add(friendship1);
-        user.Friends.Add(friendship2);
+        player.SendFriendRequest(targetPlayer);
 
         TempData["Success"] = $"Friend request sent to {Username}.";
 
-        ViewData["PlayerName"] = user.Player?.Username;
-        ViewData["PlayerLevel"] = user.Player?.Level;
+        ViewData["PlayerName"] = player.Username;
+        ViewData["PlayerLevel"] = player.Level;
 
         await dbContext.SaveChangesAsync(ct);
 
@@ -121,20 +102,16 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
 
         var user = await GetCurrentUserAsync(ct);
 
-        if (user?.AppUser is null)
-            return RedirectToPage("/Account/Login");
+        if (user?.AppUser is null) return RedirectToPage("/Account/Login");
 
         CurrentUser = user.AppUser;
 
-        if (CurrentUser.IsGuest)
-        {
-            return RedirectToPage("/Game");
-        }
+        if (CurrentUser.IsGuest) return RedirectToPage("/Game");
 
         var friendship = await dbContext.Set<Friend>()
-            .Include(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
-            .FirstOrDefaultAsync(x => x.User.Id == user.Id && x.FriendUser.Player!.Username == userName, ct);
+            .Include(x => x.Player)
+            .Include(x => x.FriendPlayer)
+            .FirstOrDefaultAsync(x => x.Player!.Id == user.Id && x.FriendPlayer!.Username == userName, ct);
 
         if (friendship is null)
         {
@@ -143,7 +120,9 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         }
 
         var targetFriendship = await dbContext.Set<Friend>()
-            .FirstOrDefaultAsync(x => x.User.Id == friendship.FriendUser.Id && x.FriendUser.Id == user.Id, ct);
+            .Include(x => x.Player)
+            .Include(x => x.FriendPlayer)
+            .FirstOrDefaultAsync(x => x.Player!.Id == friendship.FriendPlayer!.Id && x.FriendPlayer!.Id == user.Id, ct);
 
         if (targetFriendship is null)
         {
@@ -156,8 +135,8 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
 
         TempData["Success"] = $"You are now friends with {userName}.";
 
-        ViewData["PlayerName"] = user.Player?.Username;
-        ViewData["PlayerLevel"] = user.Player?.Level;
+        ViewData["PlayerName"] = user.Username;
+        ViewData["PlayerLevel"] = user.Level;
 
         await dbContext.SaveChangesAsync(ct);
 
@@ -185,9 +164,9 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         }
 
         var friendship = await dbContext.Set<Friend>()
-            .Include(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
-            .FirstOrDefaultAsync(x => x.User.Id == user.Id && x.FriendUser.Player!.Username == userName, ct);
+            .Include(x => x.Player)
+            .Include(x => x.FriendPlayer)
+            .FirstOrDefaultAsync(x => x.Player!.Id == user.Id && x.FriendPlayer!.Username == userName, ct);
 
         if (friendship is null)
         {
@@ -196,7 +175,9 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         }
 
         var targetFriendship = await dbContext.Set<Friend>()
-            .FirstOrDefaultAsync(x => x.User.Id == friendship.FriendUser.Id && x.FriendUser.Id == user.Id, ct);
+            .Include(x => x.Player)
+            .Include(x => x.FriendPlayer)
+            .FirstOrDefaultAsync(x => x.Player!.Id == friendship.FriendPlayer!.Id && x.FriendPlayer!.Id == user.Id, ct);
 
         dbContext.Set<Friend>().Remove(friendship);
 
@@ -207,8 +188,8 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
 
         TempData["Success"] = $"Friend request from {userName} rejected.";
 
-        ViewData["PlayerName"] = user.Player?.Username;
-        ViewData["PlayerLevel"] = user.Player?.Level;
+        ViewData["PlayerName"] = user.Username;
+        ViewData["PlayerLevel"] = user.Level;
 
         await dbContext.SaveChangesAsync(ct);
         return RedirectToPage("/Friends/List");
@@ -235,9 +216,8 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         }
 
         var friendship = await dbContext.Set<Friend>()
-            .Include(x => x.FriendUser)
-            .ThenInclude(x => x.Player)
-            .FirstOrDefaultAsync(x => x.User.Id == user.Id && x.FriendUser.Player!.Username == userName, ct);
+            .Include(x => x.FriendPlayer)
+            .FirstOrDefaultAsync(x => x.Player.Id == user.Id && x.FriendPlayer.Username == userName, ct);
 
         if (friendship is null)
         {
@@ -246,7 +226,8 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
         }
 
         var targetFriendship = await dbContext.Set<Friend>()
-            .FirstOrDefaultAsync(x => x.User.Id == friendship.FriendUser.Id && x.FriendUser.Id == user.Id, ct);
+            .Include(x => x.Player)
+            .FirstOrDefaultAsync(x => x.Player!.Id == friendship.FriendPlayer!.Id && x.FriendPlayer!.Id == user.Id, ct);
 
         dbContext.Set<Friend>().Remove(friendship);
 
@@ -254,23 +235,24 @@ public class ListModel(UserManager<ApplicationUser> userManager, CityVilleDbCont
 
         TempData["Success"] = $"Friend request to {userName} cancelled.";
 
-        ViewData["PlayerName"] = user.Player?.Username;
-        ViewData["PlayerLevel"] = user.Player?.Level;
+        ViewData["PlayerName"] = user.Username;
+        ViewData["PlayerLevel"] = user.Level;
 
         await dbContext.SaveChangesAsync(ct);
         return RedirectToPage("/Friends/List");
     }
 
-    private async Task<User?> GetCurrentUserAsync(CancellationToken ct)
+    private async Task<Player?> GetCurrentUserAsync(CancellationToken ct)
     {
         CurrentUser = await userManager.GetUserAsync(User);
 
         if (CurrentUser is null)
             return null;
 
-        return await dbContext.Set<User>()
+        return await dbContext.Set<Player>()
             .Include(x => x.AppUser)
-            .Include(x => x.Player)
+            .Include(x => x.Friends)
+            .ThenInclude(x => x.FriendPlayer)
             .FirstOrDefaultAsync(x => x.AppUser!.Id == CurrentUser.Id, ct);
     }
 }

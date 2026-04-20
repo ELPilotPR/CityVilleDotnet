@@ -17,7 +17,7 @@ namespace CityVilleDotnet.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.5")
+                .HasAnnotation("ProductVersion", "10.0.6")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -238,11 +238,14 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.Property<int>("EnergyLeft")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("FriendUserId")
+                    b.Property<Guid>("FriendPlayerId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<long>("LastEnergyLeftReset")
                         .HasColumnType("bigint");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("Requested")
                         .HasColumnType("bit");
@@ -250,16 +253,13 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("FriendUserId");
+                    b.HasIndex("FriendPlayerId");
+
+                    b.HasIndex("PlayerId");
 
                     b.HasIndex("Status");
-
-                    b.HasIndex("UserId");
 
                     b.ToTable("Friend");
                 });
@@ -283,9 +283,18 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.Property<Guid?>("PlayerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("StorageType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("StoredObjectId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PlayerId");
+
+                    b.HasIndex("StoredObjectId");
 
                     b.ToTable("InventoryItem");
                 });
@@ -449,6 +458,9 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AppUserId")
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<int>("Cash")
                         .HasColumnType("int");
 
@@ -475,6 +487,9 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     b.Property<bool>("IsNew")
                         .HasColumnType("bit");
+
+                    b.Property<int>("LastPlayedWorldType")
+                        .HasColumnType("int");
 
                     b.Property<int>("LastTrackingTimestamp")
                         .HasColumnType("int");
@@ -514,12 +529,19 @@ namespace CityVilleDotnet.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<int?>("WorldId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Xp")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AppUserId");
+
                     b.HasIndex("Snuid");
+
+                    b.HasIndex("WorldId");
 
                     b.ToTable("Player");
                 });
@@ -532,6 +554,9 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("Location")
                         .HasColumnType("int");
 
@@ -542,6 +567,9 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     b.Property<int>("Order")
                         .HasColumnType("int");
+
+                    b.Property<Guid?>("PlayerId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.PrimitiveCollection<string>("Progress")
                         .IsRequired()
@@ -554,16 +582,13 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.Property<int>("QuestType")
                         .HasColumnType("int");
 
-                    b.Property<Guid?>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Name");
 
-                    b.HasIndex("QuestType");
+                    b.HasIndex("PlayerId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("QuestType");
 
                     b.ToTable("Quest");
                 });
@@ -589,36 +614,6 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.HasIndex("PlayerId");
 
                     b.ToTable("SeenFlag");
-                });
-
-            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.User", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AppUserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<Guid?>("PlayerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("WorldId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AppUserId");
-
-                    b.HasIndex("PlayerId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("WorldId");
-
-                    b.ToTable("User");
                 });
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.VisitorHelpOrder", b =>
@@ -710,6 +705,9 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.PrimitiveCollection<string>("ThemeCollections")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
 
                     b.Property<string>("WorldName")
                         .IsRequired()
@@ -997,21 +995,21 @@ namespace CityVilleDotnet.Persistence.Migrations
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.Friend", b =>
                 {
-                    b.HasOne("CityVilleDotnet.Domain.Entities.User", "FriendUser")
+                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", "FriendPlayer")
                         .WithMany()
-                        .HasForeignKey("FriendUserId")
+                        .HasForeignKey("FriendPlayerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("CityVilleDotnet.Domain.Entities.User", "User")
+                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", "Player")
                         .WithMany("Friends")
-                        .HasForeignKey("UserId")
+                        .HasForeignKey("PlayerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("FriendUser");
+                    b.Navigation("FriendPlayer");
 
-                    b.Navigation("User");
+                    b.Navigation("Player");
                 });
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.InventoryItem", b =>
@@ -1019,6 +1017,12 @@ namespace CityVilleDotnet.Persistence.Migrations
                     b.HasOne("CityVilleDotnet.Domain.Entities.Player", null)
                         .WithMany("InventoryItems")
                         .HasForeignKey("PlayerId");
+
+                    b.HasOne("CityVilleDotnet.Domain.Entities.WorldObject", "StoredObject")
+                        .WithMany()
+                        .HasForeignKey("StoredObjectId");
+
+                    b.Navigation("StoredObject");
                 });
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.LicenseItem", b =>
@@ -1051,29 +1055,11 @@ namespace CityVilleDotnet.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.Quest", b =>
-                {
-                    b.HasOne("CityVilleDotnet.Domain.Entities.User", null)
-                        .WithMany("Quests")
-                        .HasForeignKey("UserId");
-                });
-
-            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.SeenFlag", b =>
-                {
-                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", null)
-                        .WithMany("SeenFlags")
-                        .HasForeignKey("PlayerId");
-                });
-
-            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.User", b =>
+            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.Player", b =>
                 {
                     b.HasOne("CityVilleDotnet.Domain.Entities.ApplicationUser", "AppUser")
                         .WithMany()
                         .HasForeignKey("AppUserId");
-
-                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", "Player")
-                        .WithMany()
-                        .HasForeignKey("PlayerId");
 
                     b.HasOne("CityVilleDotnet.Domain.Entities.World", "World")
                         .WithMany()
@@ -1081,9 +1067,21 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     b.Navigation("AppUser");
 
-                    b.Navigation("Player");
-
                     b.Navigation("World");
+                });
+
+            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.Quest", b =>
+                {
+                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", null)
+                        .WithMany("Quests")
+                        .HasForeignKey("PlayerId");
+                });
+
+            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.SeenFlag", b =>
+                {
+                    b.HasOne("CityVilleDotnet.Domain.Entities.Player", null)
+                        .WithMany("SeenFlags")
+                        .HasForeignKey("PlayerId");
                 });
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.VisitorHelpOrder", b =>
@@ -1173,6 +1171,8 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     b.Navigation("Franchises");
 
+                    b.Navigation("Friends");
+
                     b.Navigation("InventoryItems");
 
                     b.Navigation("Licenses");
@@ -1181,16 +1181,11 @@ namespace CityVilleDotnet.Persistence.Migrations
 
                     b.Navigation("Masteries");
 
+                    b.Navigation("Quests");
+
                     b.Navigation("SeenFlags");
 
                     b.Navigation("VisitorHelpOrders");
-                });
-
-            modelBuilder.Entity("CityVilleDotnet.Domain.Entities.User", b =>
-                {
-                    b.Navigation("Friends");
-
-                    b.Navigation("Quests");
                 });
 
             modelBuilder.Entity("CityVilleDotnet.Domain.Entities.World", b =>

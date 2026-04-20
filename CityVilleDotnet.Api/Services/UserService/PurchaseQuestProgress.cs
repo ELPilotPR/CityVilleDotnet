@@ -12,20 +12,18 @@ namespace CityVilleDotnet.Api.Services.UserService;
 
 public class PurchaseQuestProgress(CityVilleDbContext context, ILogger<PurchaseQuestProgress> logger) : AmfService<PurchaseQuestProgressRequest>
 {
-    public override async Task<ASObject> HandlePacket(PurchaseQuestProgressRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(PurchaseQuestProgressRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.SeenFlags)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new Exception("Can't to find user with UserId");
+            .Include(x => x.SeenFlags)
+            .Include(x => x.InventoryItems)
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken) ?? throw new Exception("Player not found");
 
         logger.LogDebug("Quest {QuestName} at {TaskIndex} is purchased", request.QuestName, request.TaskIndex);
 
-        var currentQuest = user.Quests.FirstOrDefault(x => x.Name == request.QuestName && x.QuestType == QuestType.Active);
+        var currentQuest = player.Quests.FirstOrDefault(x => x.Name == request.QuestName && x.QuestType == QuestType.Active);
 
         if (currentQuest is null) throw new Exception("Quest not found");
 
@@ -38,8 +36,6 @@ public class PurchaseQuestProgress(CityVilleDbContext context, ILogger<PurchaseQ
 
         if (cashCost > 0)
         {
-            var player = user.GetPlayer();
-
             if (player.Cash < cashCost)
                 return new CityVilleResponse().Error(GameErrorType.NotEnoughMoney);
 
@@ -48,14 +44,11 @@ public class PurchaseQuestProgress(CityVilleDbContext context, ILogger<PurchaseQ
 
         currentQuest.PurchaseProgression(request.TaskIndex);
 
-        user.CheckCompletedQuests();
+        player.CheckCompletedQuests();
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return new CityVilleResponse().MetaData(new ASObject
-        {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Where(x => x.QuestType == QuestType.Active).Select(x => x.ToDto()))
-        });
+        return new CityVilleResponse();
     }
 }
 

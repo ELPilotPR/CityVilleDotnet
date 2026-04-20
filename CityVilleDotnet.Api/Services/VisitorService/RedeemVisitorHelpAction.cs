@@ -8,28 +8,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CityVilleDotnet.Api.Services.VisitorService;
 
-public sealed class RedeemVisitorHelpAction(CityVilleDbContext context) : AmfService<RedeemVisitorHelpActionRequest>
+public sealed class RedeemVisitorHelpAction(CityVilleDbContext context, ILogger<RedeemVisitorHelpAction> logger) : AmfService<RedeemVisitorHelpActionRequest>
 {
-    public override async Task<ASObject> HandlePacket(RedeemVisitorHelpActionRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(RedeemVisitorHelpActionRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.VisitorHelpOrders.Where(o => o.SenderId == request.SenderId))
+            .Include(x => x.VisitorHelpOrders.Where(o => o.SenderId == request.SenderId))
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects.Where(o => o.WorldFlatId == request.WorldObjectId))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Masteries)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .Include(x => x.Masteries)
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user?.Player is null) throw new Exception($"User not found with id {userId}");
+        if (player is null) throw new Exception("Player not found");
 
-        var visitOrder = user.Player.VisitorHelpOrders.FirstOrDefault(x => x.SenderId == request.SenderId && x.HelpTargets.Contains(request.WorldObjectId));
+        var visitOrder = player.VisitorHelpOrders.FirstOrDefault(x => x.SenderId == request.SenderId && x.HelpTargets.Contains(request.WorldObjectId));
 
         if (visitOrder is null)
             throw new Exception("Can't find help visit order");
@@ -41,43 +37,65 @@ public sealed class RedeemVisitorHelpAction(CityVilleDbContext context) : AmfSer
 
         if (request.Action == "harvest")
         {
-            var world = user.GetWorld();
+            var world = player.GetWorld();
             var obj = world.GetBuildingById(request.WorldObjectId) ?? throw new Exception($"Can't find building with id {request.WorldObjectId}");
 
-            obj.Harvest();
-            user.Player!.CollectDoobersRewards(obj.ContractName ?? obj.ItemName);
-
-            user.HandleQuestsProgress("harvestByClass", className: obj.ClassName.ToString());
-
-            if (obj.ClassName == BuildingClassType.Plot)
+            if (obj.CanHarvest())
             {
-                user.HandleQuestsProgress("harvestPlotByName", itemName: obj.ItemName);
+                var itemName = obj.GetItemName();
+                var className = obj.GetClassName();
 
-                if (gameItem.HasMasteries())
+                obj.Harvest();
+                player.CollectDoobersRewards(itemName);
+
+                player.HandleQuestsProgress("harvestByClass", className: className.ToString());
+
+                if (obj.ClassName == BuildingClassType.Plot)
                 {
-                    user.Player.IncrementMastery(gameItem.Name);
+                    player.HandleQuestsProgress("harvestPlotByName", itemName: itemName);
+
+                    if (gameItem.HasMasteries())
+                    {
+                        player.IncrementMastery(gameItem.Name);
+                    }
                 }
-            }
 
-            if (obj.ClassName == BuildingClassType.Business)
+                if (obj.ClassName == BuildingClassType.Business)
+                {
+                    player.HandleQuestsProgress("harvestBusinessByName", itemName: itemName);
+                    player.HandleQuestsProgress("harvestBusinessByClass", className: className.ToString());
+                }
+
+                if (obj.ClassName == BuildingClassType.Residence)
+                {
+                    player.HandleQuestsProgress("harvestResidenceByName", itemName: obj.ItemName);
+                }
+
+                player.CheckCompletedQuests();
+            }
+        }
+
+        if (request.Action == "")
+        {
+            var world = player.GetWorld();
+            var obj = world.GetBuildingById(request.WorldObjectId) ?? throw new Exception($"Can't find building with id {request.WorldObjectId}");
+
+            if (obj.GetClassName() == BuildingClassType.Plot && obj.State == WorldObjectState.Planted)
             {
-                user.HandleQuestsProgress("harvestBusinessByName", itemName: obj.ItemName);
-                user.HandleQuestsProgress("harvestBusinessByClass", className: obj.ClassName.ToString());
+                // Plot can be watered
+                obj.BoostPlot();
             }
-
-            if (obj.ClassName == BuildingClassType.Residence)
+            else
             {
-                user.HandleQuestsProgress("harvestResidenceByName", itemName: obj.ItemName);
+                logger.LogError("Not supported help type {RequestAction}", request.Action);
             }
-
-            user.CheckCompletedQuests();
         }
 
         visitOrder.RemoveTarget(request.WorldObjectId);
 
         if (visitOrder.HelpTargets.Length == 0)
         {
-            user.Player.VisitorHelpOrders.Remove(visitOrder);
+            player.VisitorHelpOrders.Remove(visitOrder);
             context.Remove(visitOrder);
         }
 

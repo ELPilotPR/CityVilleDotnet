@@ -11,16 +11,16 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 internal sealed class BuildFloor(CityVilleDbContext context) : AmfService<BuildFloorRequest>
 {
-    public override async Task<ASObject> HandlePacket(BuildFloorRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(BuildFloorRequest request, Guid playerId, CancellationToken cancellationToken)
     {
         // TODO: Check if this transaction is only used for headquarters
-        var user = await context.Set<User>()
+        var user = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects.Where(o => o.ClassName == request.Building.ClassName))
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user is null) throw new Exception($"User not found with id {userId}");
+        if (user is null) throw new Exception("Player not found");
 
         var world = user.GetWorld();
 

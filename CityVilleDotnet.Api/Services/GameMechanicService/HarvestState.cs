@@ -11,21 +11,19 @@ namespace CityVilleDotnet.Api.Services.GameMechanicService;
 
 internal sealed class HarvestState(CityVilleDbContext context) : AmfService<HarvestStateRequest>
 {
-    public override async Task<ASObject> HandlePacket(HarvestStateRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(HarvestStateRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var user = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
             .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user?.Player is null) throw new Exception($"User not found with id {userId}");
+        if (user is null) throw new Exception("Player not found");
 
         var world = user.GetWorld();
 
@@ -37,12 +35,12 @@ internal sealed class HarvestState(CityVilleDbContext context) : AmfService<Harv
         {
             var energyCost = int.Parse(gameItem.EnergyCost.Harvest);
 
-            if (!user.Player.RemoveEnergy(energyCost))
+            if (!user.RemoveEnergy(energyCost))
                 return new CityVilleResponse().Error(GameErrorType.NotEnoughMoney);
         }
 
         obj.Harvest();
-        user.Player.CollectDoobersRewards(obj.GetItemName());
+        user.CollectDoobersRewards(obj.GetItemName());
 
         user.HandleQuestsProgress("harvestByClass", className: obj.GetClassName().ToString());
         user.HandleQuestsProgress("harvestBusinessByName", itemName: obj.GetItemName());

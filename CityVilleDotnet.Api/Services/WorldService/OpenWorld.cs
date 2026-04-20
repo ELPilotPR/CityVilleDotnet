@@ -1,5 +1,6 @@
 using CityVilleDotnet.Api.Common.Amf;
 using CityVilleDotnet.Domain.Entities;
+using CityVilleDotnet.Domain.Enums;
 using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
 using FluorineFx;
@@ -9,31 +10,31 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 public class OpenWorld(CityVilleDbContext context, ILogger<OpenWorld> logger) : AmfService<OpenWorldRequest>
 {
-    public override async Task<ASObject> HandlePacket(OpenWorldRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(OpenWorldRequest request, Guid playerId, CancellationToken cancellationToken)
     {
         // Called after visiting friend, might be used to load player world back and move to different player worlds
 
         // TODO: Update this to support other worlds type (world_main)
-        logger.LogDebug("OpenWorld for user {UserId} targeting {OwnerId} world {WorldName}", userId, request.OwnerId, request.WorldName);
+        logger.LogDebug("OpenWorld for user {UserId} targeting {OwnerId} world {WorldType}", playerId, request.OwnerId, request.WorldType);
 
-        var userToLoad = await context.Set<User>()
+        var playerToLoad = await context.Set<Player>()
             .AsNoTracking()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
             .Include(x => x.World)
             .ThenInclude(x => x!.MapRects)
-            .Include(x => x.Player)
-            .FirstOrDefaultAsync(x => x.Player!.Snuid == request.OwnerId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Snuid == request.OwnerId, cancellationToken);
 
-        if (userToLoad is null)
-            throw new Exception($"Unable to find user with Player.Uid {request.OwnerId}");
+        if (playerToLoad is null)
+            throw new Exception($"Unable to find player with Player.Uid {request.OwnerId}");
 
-        var dtoUser = userToLoad.ToDto();
+        var dtoUser = playerToLoad.ToDto();
 
         var response = (ASObject)AmfConverter.Convert(dtoUser.UserInfo);
 
-        if (!request.PreloadRequired)
+        // FIXME: Don't remove world in open world for owned worlds otherwise it will clear the map. This cause weird reload in game, might not be the best way
+        if (!request.PreloadRequired && playerToLoad.Id != playerId)
         {
             // Remove the world from the response to make Samantha city work, the world is already cached with PreloadWorld
             // Avoid resetting energy from initialVisit
@@ -42,14 +43,26 @@ public class OpenWorld(CityVilleDbContext context, ILogger<OpenWorld> logger) : 
 
         var featuredData = dtoUser.FeatureData;
 
-        if (userToLoad.GetPlayer().IsSamantha())
+        if (playerToLoad.IsSamantha())
         {
             // socialInventory feature is enabled after level 10
             // TODO: Check if needed to implement it better
             featuredData["socialInventory"] = new ASObject
             {
-                { "samObjectIds", new ASObject(userToLoad.GetWorld().Objects.ToDictionary(x => x.WorldFlatId.ToString(), _ => (object)0)) }
+                { "samObjectIds", new ASObject(playerToLoad.GetWorld().Objects.ToDictionary(x => x.WorldFlatId.ToString(), _ => (object)0)) }
             };
+        }
+
+        if (playerToLoad.Id == playerId)
+        {
+            var trackedPlayer = await context.Set<Player>().FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
+
+            if (trackedPlayer is null)
+                throw new Exception("Unable to find player");
+
+            trackedPlayer.SwitchWorld(request.WorldType);
+
+            await context.SaveChangesAsync(cancellationToken);
         }
 
         response!["franchises"] = new List<object>();
@@ -68,6 +81,6 @@ public class OpenWorld(CityVilleDbContext context, ILogger<OpenWorld> logger) : 
 public class OpenWorldRequest
 {
     [AmfParam(0)] public int OwnerId { get; set; }
-    [AmfParam(1)] public string WorldName { get; set; } = string.Empty;
+    [AmfParam(1)] public WorldType WorldType { get; set; }
     [AmfParam(3)] public bool PreloadRequired { get; set; }
 }

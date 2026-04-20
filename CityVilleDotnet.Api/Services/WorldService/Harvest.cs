@@ -4,7 +4,6 @@ using CityVilleDotnet.Common.Settings;
 using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Domain.EnumExtensions;
 using CityVilleDotnet.Domain.Enums;
-using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
 using FluorineFx;
 using Microsoft.EntityFrameworkCore;
@@ -13,26 +12,22 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 internal sealed class Harvest(CityVilleDbContext context, ILogger<HarvestRequest> logger) : AmfService<HarvestRequest>
 {
-    public override async Task<ASObject> HandlePacket(HarvestRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(HarvestRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var user = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
-            .ThenInclude(x => x!.Objects)
+            .ThenInclude(x => x!.Objects.Where(o => o.X == request.Building.Position.X && o.Y == request.Building.Position.Y))
             .ThenInclude(x => x.FranchiseLocation)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.SeenFlags)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.SeenFlags)
             .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Masteries)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new Exception("Can't find user with UserId");
+            .Include(x => x.Masteries)
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user.Player is null) throw new Exception("Player not found for user");
+        if (user is null) throw new Exception("Player not found");
 
         var world = user.GetWorld();
 
@@ -47,26 +42,29 @@ internal sealed class Harvest(CityVilleDbContext context, ILogger<HarvestRequest
 
         if (gameItem is null)
             throw new Exception($"Can't find game item for {itemName}");
+        
+        var className = obj.GetClassName();
+
+        if (!obj.CanHarvest())
+            throw new Exception("Building is not harvestable");
 
         if (gameItem.EnergyCost?.Harvest is not null)
         {
             var energyCost = int.Parse(gameItem.EnergyCost.Harvest);
 
-            if (!user.Player!.RemoveEnergy(energyCost))
-            {
+            if (!user.RemoveEnergy(energyCost))
                 return new CityVilleResponse().Error(GameErrorType.NotEnoughMoney);
-            }
         }
-
-        var className = obj.GetClassName();
+        
         var coinMultiplier = className.IsBusiness() ? Math.Max(obj.Visits ?? 0, 1) : 1;
         var (coinYield, cashYield) = obj.Harvest();
-        var secureRands = user.Player!.CollectDoobersRewards(itemName, coinMultiplier: coinMultiplier);
+        var secureRands = user.CollectDoobersRewards(itemName, coinMultiplier: coinMultiplier);
 
         logger.LogDebug("Secure rands {Join}", string.Join(",", secureRands.ToArray()));
         logger.LogDebug("Secure rands {SecureRandsCount}", secureRands.Count);
 
         user.HandleQuestsProgress("harvestByClass", className: className.ToString());
+        user.HandleQuestsProgress("harvestByKeyword", itemName: itemName);
 
         if (obj.ClassName == BuildingClassType.Plot)
         {
@@ -74,7 +72,7 @@ internal sealed class Harvest(CityVilleDbContext context, ILogger<HarvestRequest
 
             if (gameItem.HasMasteries())
             {
-                user.Player.IncrementMastery(gameItem.Name);
+                user.IncrementMastery(gameItem.Name);
             }
         }
 
@@ -104,9 +102,6 @@ internal sealed class Harvest(CityVilleDbContext context, ILogger<HarvestRequest
             ["secureRands"] = AmfConverter.Convert(secureRands),
             ["objectPopulation"] = objectPopulation,
             ["worldPopulation"] = worldPopulation
-        }).MetaData(new ASObject
-        {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Where(x => x.QuestType == QuestType.Active).Select(x => x.ToDto()))
         });
     }
 }

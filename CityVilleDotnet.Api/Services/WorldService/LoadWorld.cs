@@ -1,5 +1,6 @@
 ﻿using CityVilleDotnet.Api.Common.Amf;
 using CityVilleDotnet.Domain.Entities;
+using CityVilleDotnet.Domain.Enums;
 using CityVilleDotnet.Domain.GameEntities;
 using CityVilleDotnet.Persistence;
 using FluorineFx;
@@ -9,42 +10,48 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 public sealed class LoadWorld(CityVilleDbContext context, ILogger<LoadWorld> logger) : AmfService<LoadWorldRequest>
 {
-    public override async Task<ASObject> HandlePacket(LoadWorldRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(LoadWorldRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        logger.LogInformation("LoadWorld for user {UserId} visiting {VisitUserId}", userId, request.TargetUsedId);
-
-        var userToLoad = await context.Set<User>()
+        var playerToLoad = await context.Set<Player>()
             .AsNoTracking()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
             .Include(x => x.World)
             .ThenInclude(x => x!.MapRects)
-            .Include(x => x.Player)
-            .FirstOrDefaultAsync(x => x.Player!.Snuid == request.TargetUsedId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Snuid == request.TargetUsedId, cancellationToken);
 
-        if (userToLoad is null)
-            throw new Exception($"Unable to find user with Player.Uid {request.TargetUsedId}");
+        if (playerToLoad is null)
+            throw new Exception($"Unable to find player with Player.Uid {request.TargetUsedId}");
 
-        if (userToLoad.UserId.ToString() != userId.ToString())
+        if (playerToLoad.Id != playerId)
         {
-            var currentUser = await context.Set<User>()
+            var currentPlayer = await context.Set<Player>()
                 .AsSplitQuery()
                 .Include(x => x.Quests)
-                .Include(x => x.Player)
-                .ThenInclude(x => x!.InventoryItems)
-                .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+                .Include(x => x.InventoryItems)
+                .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-            if (currentUser is null)
-                throw new Exception($"Unable to find current user with UserId {userId}");
+            if (currentPlayer is null)
+                throw new Exception("Current player not found");
 
-            currentUser.HandleQuestsProgress("neighborVisit");
-            currentUser.CheckCompletedQuests();
+            currentPlayer.HandleQuestsProgress("neighborVisit");
+            currentPlayer.CheckCompletedQuests();
 
             await context.SaveChangesAsync(cancellationToken);
         }
+        else
+        {
+            var trackedPlayer = await context.Set<Player>().FirstOrDefaultAsync(x => x.Snuid == request.TargetUsedId, cancellationToken);
 
-        var dtoUser = userToLoad.ToDto();
+            if (trackedPlayer is null)
+                throw new Exception($"Unable to find player with Player.Uid {request.TargetUsedId}");
+
+            trackedPlayer.SwitchWorld(request.Type);
+            playerToLoad.SwitchWorld(request.Type);
+        }
+
+        var dtoUser = playerToLoad.ToDto();
 
         var response = (ASObject)AmfConverter.Convert(dtoUser.UserInfo);
         response!["franchises"] = new List<object>();
@@ -56,4 +63,5 @@ public sealed class LoadWorld(CityVilleDbContext context, ILogger<LoadWorld> log
 public class LoadWorldRequest
 {
     [AmfParam(0)] public int TargetUsedId { get; set; }
+    [AmfParam(1)] public WorldType Type { get; set; }
 }

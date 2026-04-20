@@ -11,30 +11,28 @@ namespace CityVilleDotnet.Api.Services.WorldService;
 
 internal sealed class Finish(CityVilleDbContext context) : AmfService<FinishRequest>
 {
-    public override async Task<ASObject> HandlePacket(FinishRequest request, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(FinishRequest request, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .AsSplitQuery()
             .Include(x => x.World)
             .ThenInclude(x => x!.Objects)
             .ThenInclude(x => x.FranchiseLocation)
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.InventoryItems)
-            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active).OrderBy(q => q.Order))
-            .Include(x => x.Player)
-            .ThenInclude(x => x!.Collections)
+            .Include(x => x.InventoryItems)
+            .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active))
+            .Include(x => x.Collections)
             .ThenInclude(x => x.Items)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new Exception("Can't find user with UserId");
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user.Player is null) throw new Exception("Player not found for user");
+        if (player is null) throw new Exception("Player not found");
 
-        var world = user.GetWorld();
+        var world = player.GetWorld();
 
         var obj = world.GetBuildingByCoord(request.Building.Position.X, request.Building.Position.Y, request.Building.Position.Z) ?? throw new Exception($"Can't find building with ID {request.Building.Id}");
 
         if (obj.Builds is null)
             throw new Exception($"Can't find `builds` {obj}");
-        
+
         var constructionItemName = obj.ItemName;
 
         var createdObjects = obj.FinishConstruction();
@@ -47,17 +45,14 @@ internal sealed class Finish(CityVilleDbContext context) : AmfService<FinishRequ
 
         world.CalculatePopulation();
 
-        user.HandleQuestsProgress(""); // Empty actionType to force recheck counts
-        user.CheckCompletedQuests();
+        player.HandleQuestsProgress(""); // Empty actionType to force recheck counts
+        player.CheckCompletedQuests();
 
-        user.Player!.CollectDoobersRewards(constructionItemName);
+        player.CollectDoobersRewards(constructionItemName);
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return new CityVilleResponse().MetaData(new ASObject
-        {
-            ["QuestComponent"] = AmfConverter.Convert(user.Quests.Select(x => x.ToDto()))
-        }).Data(new ASObject
+        return new CityVilleResponse().Data(new ASObject
         {
             ["id"] = obj.WorldFlatId
         });

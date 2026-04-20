@@ -1,7 +1,6 @@
-﻿using CityVilleDotnet.Domain.Entities;
 using System.Text.Json.Serialization;
-using CityVilleDotnet.Common.Utils;
-using CityVilleDotnet.Domain.EnumExtensions;
+using CityVilleDotnet.Common.Settings;
+using CityVilleDotnet.Domain.Entities;
 using CityVilleDotnet.Domain.Enums;
 using FluorineFx;
 
@@ -20,11 +19,11 @@ public class PlayerDto
 
     [JsonPropertyName("wishlist")] public List<object> Wishlist { get; set; } = [];
 
-    [JsonPropertyName("options")] public OptionsDto? Options { get; set; }
+    [JsonPropertyName("options")] public required OptionsDto Options { get; set; }
 
-    [JsonPropertyName("commodities")] public CommoditiesDto? Commodities { get; set; }
+    [JsonPropertyName("commodities")] public required CommoditiesDto Commodities { get; set; }
 
-    [JsonPropertyName("inventory")] public InventoryDto? Inventory { get; set; }
+    [JsonPropertyName("inventory")] public required InventoryDto Inventory { get; set; }
 
     [JsonPropertyName("gold")] public int Gold { get; set; } = 500;
 
@@ -71,178 +70,73 @@ public class PlayerDto
 
     [JsonPropertyName("fastbuild")] public bool FastBuild { get; set; } = true;
 
-    [JsonPropertyName("storageComponent")] public ASObject StorageComponent { get; set; } = new();
+    [JsonPropertyName("storageComponent")] public Dictionary<string, object> StorageComponent { get; set; } = new();
 
-    [JsonPropertyName("additionalWareHouseSlots")] public int AdditionalWareHouseSlots { get; set; } = 0;
+    [JsonPropertyName("additionalWareHouseSlots")]
+    public int AdditionalWareHouseSlots { get; set; } = 0;
+
+    [JsonPropertyName("quests")] public List<QuestDto> ActiveQuests { get; set; } = [];
 }
 
 public static class PlayerDtoMapper
 {
-    public static PlayerDto ToDto(this Player model, World playerWorld, List<NeighborDto> friends)
+    public static Dictionary<string, object> ToStorageComponentDto(this Player model)
     {
-        return new PlayerDto
+        var mStorage = new Dictionary<string, object>();
+
+        foreach (var obj in model.GetWorld().Objects)
         {
-            Uid = model.Snuid.ToString(),
-            Cash = model.Cash,
-            Collections = new ASObject(model.Collections
-                .GroupBy(item => item.Name)
-                .ToDictionary(
-                    group => group.Key, object (group) => new ASObject(
-                        group.SelectMany(x => x.Items).ToDictionary(x => x.Name, x => (object)x.Amount))
-                )),
-            Commodities = new CommoditiesDto
+            if (obj.ClassName != BuildingClassType.ItemStorage) continue;
+
+            var gameItem = GameSettingsManager.Instance.GetItem(obj.ItemName);
+
+            if (gameItem?.StorageUnit is null) continue;
+
+            var storageType = gameItem.StorageUnit.StorageType;
+            var storageKey = gameItem.StorageUnit.StorageKey;
+
+            if (storageType is null || storageKey is null) continue;
+
+            if (!mStorage.ContainsKey(storageType))
+                mStorage[storageType] = new Dictionary<string, object>();
+
+            var byType = (Dictionary<string, object>)mStorage[storageType];
+
+            if (!byType.ContainsKey(storageKey))
             {
-                Storage = new StorageDto
+                var innerStorage = new Dictionary<string, object>();
+
+                foreach (var item in model.InventoryItems.Where(x => x.StorageType == storageKey))
                 {
-                    Goods = model.Goods,
-                    PremiumGoods = model.PremiumGoods
+                    if (item.StoredObject is null)
+                    {
+                        innerStorage[item.Name] = item.Amount;
+                    }
+                    else
+                    {
+                        var worldObjects = new List<WorldObjectDto>();
+
+                        for (var i = 0; i < item.Amount; i++)
+                        {
+                            worldObjects.Add(item.StoredObject.ToDto());
+                        }
+
+                        innerStorage[item.Name] = worldObjects;
+                    }
                 }
-            },
-            CompletedCollections = new ASObject(model.Collections.Where(x => x.Completed > 0).ToDictionary(x => x.Name, x => (object)x.Completed)),
-            Energy = model.Energy,
-            EnergyMax = model.EnergyMax,
-            LastEnergyCheck = model.GetLastCheckEnergyTimestamp(),
-            ExpansionsPurchased = model.ExpansionsPurchased,
-            Gold = model.Gold,
-            Inventory = new InventoryDto
-            {
-                Count = model.CountInventoryItems(),
-                Items = new ASObject(model.InventoryItems.ToDictionary(x => x.Name, x => (object)x.Amount))
-            },
-            LastTrackingTimestamp = model.LastTrackingTimestamp,
-            Level = model.Level,
-            Licenses = new ASObject(model.Licenses.ToDictionary(x => x.Name, x => (object)x.Amount)),
-            Neighbors = friends, // TODO: Change this after moving friends to player
-            Options = new OptionsDto
-            {
-                MusicDisabled = model.MusicDisabled,
-                SfxDisabled = model.SfxDisabled,
-            },
-            PlayerNews = model.PlayerNews,
-            RollCounter = model.RollCounter,
-            SeenFlags = new ASObject(model.SeenFlags.ToDictionary(x => x.Key, x => (object)true)),
-            // FIXME: Handle that better
-            FlagContainer =
-            [
-                new ASObject
+
+                byType[storageKey] = new Dictionary<string, object>
                 {
-                    ["name"] = "completed_bridge",
-                    ["m_value"] = playerWorld.Objects.Count(x => x.ClassName == BuildingClassType.Bridge),
-                    ["lastModifiedGlobalEngineTime"] = 0
-                }
-            ],
-            Wishlist = model.Wishlist,
-            Xp = model.Xp,
-            SocialLevel = model.SocialLevel,
-            SocialXp = model.SocialXp,
-            Orders = BuildOrdersAsObject(model),
-            LightLevel = 0, // TODO
-            PaidEnergy = 0, // TODO
-            EnergyModifiers = new List<object>(), // TODO
-            FeatureData = new ASObject(new Dictionary<string, object>()),
-            ShowNpcCloud = true,
-            StorageComponent = playerWorld.ToStorageComponentDto(),
-            AdditionalWareHouseSlots = 0
+                    ["m_storage"] = innerStorage,
+                    ["m_capacity"] = gameItem.StorageUnit.InitialCapacity,
+                    ["m_maxCapacity"] = gameItem.StorageUnit.MaxCapacity
+                };
+            }
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["m_storage"] = mStorage
         };
-    }
-
-    private static ASObject BuildOrdersAsObject(Player model)
-    {
-        var root = new ASObject();
-        
-        // TODO: Add VisitorHelp and TrainOrder
-        foreach (var order in model.LotOrders.Where(x => x.OrderState == OrderState.Pending))
-        {
-            var orderTypeKey = order.OrderType.ToDescriptionString(); // "order_lot"
-            var transmissionKey = order.TransmissionStatus.ToDescriptionString(); // "sent"/"received"
-            var stateKey = order.OrderState.ToDescriptionString(); // "pending"/"accepted"/"denied"
-
-            var isReceived = transmissionKey == "received";
-            var otherUserId = isReceived ? $"{order.SenderId}" : $"{order.RecipientId}";
-
-            if (!root.ContainsKey(orderTypeKey))
-                root[orderTypeKey] = new ASObject();
-
-            var byTransmission = (ASObject)root[orderTypeKey]!;
-
-            if (!byTransmission.ContainsKey(transmissionKey))
-                byTransmission[transmissionKey] = new ASObject();
-
-            var byState = (ASObject)byTransmission[transmissionKey]!;
-
-            if (!byState.ContainsKey(stateKey))
-                byState[stateKey] = new ASObject();
-
-            var byOtherUser = (ASObject)byState[stateKey]!;
-
-            if (!byOtherUser.ContainsKey(otherUserId))
-                byOtherUser[otherUserId] = new ASObject();
-
-            var orderParams = new ASObject
-            {
-                ["senderID"] = order.SenderId,
-                ["recipientID"] = order.RecipientId,
-                ["timeSent"] = order.TimeSent,
-                ["lastTimeReminded"] = order.LastTimeReminded,
-                ["orderType"] = orderTypeKey,
-                ["orderState"] = stateKey,
-                ["transmissionStatus"] = transmissionKey,
-
-                ["lotId"] = order.LotId,
-                ["resourceType"] = order.ResourceType,
-                ["orderResourceName"] = order.OrderResourceName,
-                ["constructionCount"] = order.ConstructionCount,
-                ["offsetX"] = order.OffsetX,
-                ["offsetY"] = order.OffsetY
-            };
-
-            byOtherUser[otherUserId] = orderParams;
-        }
-
-        foreach (var order in model.VisitorHelpOrders)
-        {
-            var orderTypeKey = order.OrderType.ToDescriptionString(); // "order_lot"
-            var transmissionKey = order.TransmissionStatus.ToDescriptionString(); // "sent"/"received"
-            var stateKey = order.OrderState.ToDescriptionString(); // "pending"/"accepted"/"denied"
-
-            var isReceived = transmissionKey == "received";
-            var otherUserId = isReceived ? $"{order.SenderId}" : $"{order.RecipientId}";
-
-            if (!root.ContainsKey(orderTypeKey))
-                root[orderTypeKey] = new ASObject();
-
-            var byTransmission = (ASObject)root[orderTypeKey]!;
-
-            if (!byTransmission.ContainsKey(transmissionKey))
-                byTransmission[transmissionKey] = new ASObject();
-
-            var byState = (ASObject)byTransmission[transmissionKey]!;
-
-            if (!byState.ContainsKey(stateKey))
-                byState[stateKey] = new ASObject();
-
-            var byOtherUser = (ASObject)byState[stateKey]!;
-
-            if (!byOtherUser.ContainsKey(otherUserId))
-                byOtherUser[otherUserId] = new ASObject();
-
-            var orderParams = new ASObject
-            {
-                ["senderID"] = order.SenderId,
-                ["recipientID"] = order.RecipientId,
-                ["timeSent"] = order.TimeSent,
-                ["lastTimeReminded"] = order.LastTimeReminded,
-                ["orderType"] = orderTypeKey,
-                ["orderState"] = stateKey,
-                ["transmissionStatus"] = transmissionKey,
-
-                ["helpTargets"] = order.HelpTargets,
-                ["status"] = order.Status.ToDescriptionString()
-            };
-
-            byOtherUser[otherUserId] = orderParams;
-        }
-
-        return root;
     }
 }

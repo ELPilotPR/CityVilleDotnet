@@ -10,19 +10,18 @@ namespace CityVilleDotnet.Api.Services.TrainService;
 
 public class CompleteWelcomeTrainOrder(CityVilleDbContext context) : AmfService
 {
-    public override async Task<ASObject> HandlePacket(object[] @params, Guid userId, CancellationToken cancellationToken)
+    public override async Task<ASObject> HandlePacket(object[] @params, Guid playerId, CancellationToken cancellationToken)
     {
-        var user = await context.Set<User>()
+        var player = await context.Set<Player>()
             .Include(x => x.Quests.Where(q => q.QuestType == QuestType.Active).OrderBy(q => q.Order))
-            .Include(x => x.Player)
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == playerId, cancellationToken);
 
-        if (user?.Player is null)
-            throw new Exception("Unable to find user with UserId");
+        if (player is null)
+            throw new Exception("Player not found");
 
-        user.Player.AddGoods(GameSettingsManager.Instance.GetInt("WelcomeTrainQuestAmount"));
-        user.HandleQuestsProgress("welcomeTrain");
-        user.CheckCompletedQuests();
+        player.AddGoods(GameSettingsManager.Instance.GetSettings().WelcomeTrainQuestAmount);
+        player.HandleQuestsProgress("welcomeTrain");
+        player.CheckCompletedQuests();
 
         await context.SaveChangesAsync(cancellationToken);
 

@@ -3,6 +3,7 @@ using CityVilleDotnet.Common.Settings;
 using CityVilleDotnet.Common.Settings.GameSettings;
 using CityVilleDotnet.Common.Utils;
 using CityVilleDotnet.Domain.Enums;
+using CityVilleDotnet.Domain.GameEntities;
 using Microsoft.Extensions.Logging;
 
 namespace CityVilleDotnet.Domain.Entities;
@@ -12,8 +13,6 @@ public class Player
     public Guid Id { get; }
     public int Snuid { get; set; }
     public int LastTrackingTimestamp { get; private set; }
-    public List<object> PlayerNews { get; set; } = [];
-    public List<object> Wishlist { get; set; } = [];
     public bool SfxDisabled { get; private set; }
     public bool MusicDisabled { get; private set; }
     public List<InventoryItem> InventoryItems { get; set; } = [];
@@ -41,8 +40,17 @@ public class Player
     public List<LotOrder> LotOrders { get; set; } = [];
     public List<VisitorHelpOrder> VisitorHelpOrders { get; set; } = [];
     public List<Mastery> Masteries { get; set; } = [];
+    public World? World { get; private set; }
+    public List<Quest> Quests { get; } = [];
+    public List<Friend> Friends { get; } = [];
+    public ApplicationUser? AppUser { get; private set; }
+    public WorldType LastPlayedWorldType { get; private set; } = WorldType.Main;
 
-    public Player(string username)
+    public Player()
+    {
+    }
+
+    public Player(ApplicationUser appUser, World world)
     {
         Id = Guid.NewGuid();
         Cash = 900;
@@ -51,8 +59,12 @@ public class Player
         EnergyMax = 12;
         Goods = 100;
         PremiumGoods = 0;
-        Username = username;
+        Username = appUser.UserName!;
         CreationTimestamp = (int)ServerUtils.GetCurrentTime();
+        World = world;
+        AppUser = appUser;
+
+        Quests.Add(Quest.Create("q_rename_city", 1, QuestType.Active));
     }
 
     public void AddItemToCollection(string collectionName, string itemName, int amount = 1)
@@ -68,19 +80,19 @@ public class Player
         collection.AddItem(itemName, amount);
     }
 
-    public void AddItem(string itemName, int amount = 1)
+    public void AddItem(string itemName, int amount = 1, string? storageKey = null, WorldObject? storedObject = null)
     {
-        var item = InventoryItems.FirstOrDefault(x => x.Name == itemName);
+        var item = InventoryItems.FirstOrDefault(x => x.Name == itemName && x.StorageType == storageKey);
 
         if (item is null)
-            InventoryItems.Add(new InventoryItem(itemName, amount));
+            InventoryItems.Add(new InventoryItem(itemName, amount, storageKey, storedObject));
         else
             item.AddAmount(amount);
     }
 
-    public InventoryItem? RemoveItem(string itemName, int amount = 1)
+    public InventoryItem? RemoveItem(string itemName, int amount = 1, string? storageKey = null)
     {
-        var item = InventoryItems.FirstOrDefault(x => x.Name == itemName);
+        var item = InventoryItems.FirstOrDefault(x => x.Name == itemName && x.StorageType == storageKey);
 
         if (item is null)
             throw new Exception($"Item not found in player inventory {itemName}");
@@ -101,17 +113,17 @@ public class Player
 
     public int CountInventoryItems()
     {
-        return InventoryItems.Sum(x => x.Amount);
+        return InventoryItems.Where(x => x.StorageType is null).Sum(x => x.Amount);
     }
 
     public int CountInventoryItem(string itemName)
     {
-        return InventoryItems.Where(x => x.Name == itemName).Sum(x => x.Amount);
+        return InventoryItems.Where(x => x.Name == itemName && x.StorageType is null).Sum(x => x.Amount);
     }
 
     public bool HasItem(string itemName)
     {
-        return InventoryItems.Any(x => x.Name == itemName && x.Amount > 0);
+        return InventoryItems.Any(x => x.StorageType is null && x.Name == itemName && x.Amount > 0);
     }
 
     public void UpdateTracking()
@@ -128,7 +140,7 @@ public class Player
     private Energy CalculateCurrentEnergy()
     {
         var elapsedTime = (int)ServerUtils.GetCurrentTime() - TimeBeforeNextEnergy;
-        var timeToRegen = GameSettingsManager.Instance.GetDouble("EnergyRegenerationSeconds") * 1000;
+        var timeToRegen = GameSettingsManager.Instance.GetSettings().EnergyRegenerationSeconds * 1000;
         var toRecover = Math.Floor(elapsedTime / timeToRegen);
         var currentNewEnergy = Math.Min(Energy + (int)toRecover, EnergyMax);
         var timeSinceLastRegen = elapsedTime % timeToRegen;
@@ -229,13 +241,12 @@ public class Player
     {
         Level = level;
 
-        var levelData = GameSettingsManager.Instance.GetLevels()
-            .FirstOrDefault(x => int.Parse(x.Num) == level);
+        var levelData = GameSettingsManager.Instance.GetLevels().FirstOrDefault(x => x.Num == level);
 
         if (levelData is not null)
         {
-            EnergyMax = int.Parse(levelData.EnergyMax);
-            Xp = Math.Max(Xp, int.Parse(levelData.RequiredXp));
+            EnergyMax = levelData.EnergyMax;
+            Xp = Math.Max(Xp, levelData.RequiredXp);
         }
     }
 
@@ -255,16 +266,13 @@ public class Player
     {
         foreach (var item in GameSettingsManager.Instance.GetLevels())
         {
-            if (Xp < int.Parse(item.RequiredXp)) continue;
+            if (Xp < item.RequiredXp) continue;
 
-            var level = int.Parse(item.Num);
+            var level = item.Num;
 
             if (level <= Level) continue;
 
-            // Level up!
-            StaticLogger.Current.LogDebug("Level up! New level: {Level}", level);
-
-            var energyMax = int.Parse(item.EnergyMax);
+            var energyMax = item.EnergyMax;
 
             // TODO: Add heldEnergy and cash
             var energy = energyMax + Math.Max(Energy - energyMax, 0);
@@ -290,17 +298,15 @@ public class Player
     {
         foreach (var item in GameSettingsManager.Instance.GetSocialLevels())
         {
-            if (SocialXp < int.Parse(item.RequiredXp)) continue;
+            if (SocialXp < item.RequiredXp) continue;
 
-            var level = int.Parse(item.Num);
+            var level = item.Num;
 
             if (level <= SocialLevel) continue;
 
-            StaticLogger.Current.LogDebug("Social level up! New level: {Level}", level);
-
             SocialLevel = level;
-
-            // FIXME: Give the reward
+            
+            AddGoods(item.Reward);
 
             break;
         }
@@ -774,18 +780,244 @@ public class Player
         if (franchise is null) throw new Exception($"Can't find franchise with type {franchiseType}");
 
         // TODO: Implement bonus based on index 1 => 25 coins, 2 => 50 coins ...
-        var baseBonus = GameSettingsManager.Instance.GetInt("Franchise1DailyBonus");
+        var baseBonus = GameSettingsManager.Instance.GetSettings().Franchise1DailyBonus;
 
         var currentTime = (long)ServerUtils.GetCurrentTimeSeconds();
 
         // TODO: Add server check
         franchise.TimeLastCollected = currentTime;
-        
+
         AddCoins(baseBonus * franchise.Locations.Count);
     }
 
     public bool IsSamantha()
     {
         return Snuid == -1;
+    }
+
+    public void SetWorld(World world)
+    {
+        if (!IsSamantha())
+            throw new Exception("SetWorld is only accessible to Samantha's city");
+
+        World = world;
+    }
+
+    public World GetWorld()
+    {
+        if (World is null) throw new Exception("GetWorld called on not loaded world");
+
+        return World;
+    }
+
+    public bool IsWorldLoaded()
+    {
+        return World != null && World.Objects.Count != 0;
+    }
+
+    public void HandleQuestsProgress(string actionType, string? className = null, string? itemName = null)
+    {
+        StaticLogger.Current.LogDebug("Handle quest actionType = {ActionType}, className = {ClassName}, itemName = {ItemName}", actionType, className, itemName);
+
+        var calculatedResults = new Dictionary<string, int>();
+
+        foreach (var quest in Quests.Where(x => x.QuestType == QuestType.Active))
+        {
+            var questItem = QuestSettingsManager.Instance.GetItem(quest.Name);
+
+            if (questItem is null) continue;
+
+            var index = -1;
+
+            foreach (var task in questItem.Tasks.Tasks)
+            {
+                index++;
+
+                if (quest.Progress[index] + quest.Purchased[index] >= int.Parse(task.Total)) continue;
+
+                var actionTask = task.Action;
+                var taskType = task.Type ?? "";
+                var splitType = taskType.Contains(',') ? taskType.Split(',') : null;
+
+                var gameItem = itemName is not null ? GameSettingsManager.Instance.GetItem(itemName) : null;
+
+                // When user performs an action
+                if (!string.IsNullOrEmpty(actionType) && actionTask.Equals(actionType))
+                {
+                    switch (actionType)
+                    {
+                        case "seenQuest":
+                        case "popNews":
+                        case "sendTrain":
+                        case "welcomeTrain":
+                        case "neighborVisit":
+                        case "onValidCityName":
+                        case "incrementalExpansionCount":
+                        case "expand":
+                            quest.Progress[index] += 1;
+                            break;
+                        case "harvestByClass":
+                        case "startContractByClass":
+                        case "placeByClass":
+                        case "harvestBusinessByClass":
+                        case "clearByClass":
+                        case "openBusinessByClass":
+                        case "storeItemByClass":
+                        {
+                            if (className is null)
+                                throw new Exception("Can't validate byClass action without className");
+
+                            if (taskType.Equals(className) || (splitType is not null && splitType.Contains(className)))
+                                quest.Progress[index] += 1;
+
+                            break;
+                        }
+                        case "harvestResidenceByName":
+                        case "harvestPlotByName":
+                        case "openBusinessByName":
+                        case "harvestBusinessByName":
+                        case "placeBuildingByName":
+                        case "sendTourNeighborBusinessByName":
+                        {
+                            if (itemName is null)
+                                throw new Exception("Can't validate byName action without itemName");
+
+                            if (taskType.Equals(itemName) || (splitType is not null && splitType.Contains(itemName)))
+                                quest.Progress[index] += 1;
+
+                            break;
+                        }
+                        case "placeByKeyword":
+                        case "harvestByKeyword":
+                            if (itemName is null)
+                                throw new Exception("Can't validate byKeyword action without itemName");
+
+                            if (gameItem is null)
+                                throw new Exception("Can't validate byKeyword action without gameItem");
+
+                            if (gameItem.HasKeyword(taskType))
+                                quest.Progress[index] += 1;
+
+                            break;
+                        case "visitorHelp":
+                            // plotHarvest, businessSendTour, ...
+                            if (task.Type == className)
+                                quest.Progress[index] += 1;
+
+                            break;
+                    }
+                }
+
+                // Here we can check global values like counting population or buildings
+
+                if (!IsWorldLoaded() || task.Type is null) continue;
+
+                var resultKey = $"{task.Action}_{taskType}";
+                var value = 0;
+
+                switch (actionTask)
+                {
+                    // FIXME: countConstructionOrBuildingByName
+                    case "countWorldObjectByName":
+                    case "countConstructionOrBuildingByName":
+                    {
+                        if (splitType is null)
+                        {
+                            if (!calculatedResults.TryGetValue(resultKey, out value))
+                                calculatedResults[resultKey] = value = GetWorld().CountBuildingByName(task.Type);
+                        }
+                        else
+                        {
+                            //bus_toyota1_zyngage,bus_toyota1_zyngage_2,bus_toyota1_zyngage_3
+                            if (!calculatedResults.TryGetValue(resultKey, out value))
+                                calculatedResults[resultKey] = value = splitType.Sum(x => GetWorld().CountBuildingByName(x));
+                        }
+
+                        quest.Progress[index] = value;
+
+                        continue;
+                    }
+                    case "countWorldObjectByRegEx":
+                    {
+                        if (!calculatedResults.TryGetValue(resultKey, out value))
+                            calculatedResults[resultKey] = value = GetWorld().CountBuildingByRegex(task.Type);
+
+                        quest.Progress[index] = value;
+                        continue;
+                    }
+                    case "countPlayerResourceByType":
+                        quest.Progress[index] = task.Type switch
+                        {
+                            // population,ghost
+                            "population" => GetWorld().GetCurrentPopulation(),
+                            "coin" => Gold,
+                            "goods" => Goods,
+                            _ => 0
+                        };
+
+                        continue;
+                    case "countCollectableByName":
+                        if (!calculatedResults.TryGetValue(resultKey, out value))
+                            calculatedResults[resultKey] = value = CountCollectableByName(task.Type);
+
+                        quest.Progress[index] = value;
+                        continue;
+                    case "isQuestCompleted":
+                        quest.Progress[index] = Quests.Count(q => q.Name == task.Type);
+                        continue;
+                    case "countWorldObjectByKeyword":
+                        if (!calculatedResults.TryGetValue(resultKey, out value))
+                            calculatedResults[resultKey] = value = GetWorld().CountWorldObjectByKeyword(task.Type);
+
+                        quest.Progress[index] = value;
+                        continue;
+                }
+            }
+        }
+    }
+
+    public void CheckCompletedQuests()
+    {
+        var newQuests = new List<Quest>();
+
+        foreach (var item in Quests.Where(x => x.QuestType == QuestType.Active))
+        {
+            if (item.IsCompleted())
+            {
+                item.QuestType = QuestType.Completed;
+                item.ClaimRewards(this);
+
+                newQuests = item.StartSequels();
+            }
+        }
+
+        Quests.AddRange(newQuests);
+    }
+
+    public List<SocialNetworkUserDto> GetSocialNetworkUserFriendsList(string baseUrl)
+    {
+        return Friends.Where(f => !f.FriendPlayer.IsSamantha()).Select(friend => friend.ToSocialNetworkUserDto(baseUrl)).ToList();
+    }
+
+    public bool HasFriend(Player friend)
+    {
+        return Friends.Any(x => x.GetFriend().Id == friend.Id);
+    }
+
+    public void SendFriendRequest(Player targetPlayer)
+    {
+        if (targetPlayer.Id == Id) throw new Exception("You cannot add yourself as a friend");
+        if (HasFriend(targetPlayer)) throw new Exception("You are already friends");
+
+        var friendship1 = new Friend(targetPlayer, this, true);
+        var friendship2 = new Friend(this, targetPlayer, false);
+
+        targetPlayer.Friends.Add(friendship1);
+        Friends.Add(friendship2);
+    }
+
+    public void SwitchWorld(WorldType type)
+    {
+        LastPlayedWorldType = type;
     }
 }

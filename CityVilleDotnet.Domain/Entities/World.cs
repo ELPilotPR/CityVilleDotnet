@@ -11,15 +11,16 @@ public class World
     public string WorldName { get; private set; }
     public int SizeX { get; private set; }
     public int SizeY { get; private set; }
-    public int Population { get; set; }
-    public int PopulationCap { get; set; }
-    public int PopulationMin { get; set; }
-    public int PopulationMax { get; set; }
-    public int PotentialPopulation { get; set; }
+    public int Population { get; private set; }
+    public int PopulationCap { get; private set; }
+    public int PopulationMin { get; private set; }
+    public int PopulationMax { get; private set; }
+    public int PotentialPopulation { get; private set; }
     public int NextBuildingId { get; private set; }
     public List<string> ThemeCollections { get; set; } = [];
     public List<MapRect> MapRects { get; set; } = [];
     public List<WorldObject> Objects { get; set; } = [];
+    public WorldType Type { get; set; } = WorldType.Main;
 
     public World()
     {
@@ -100,6 +101,22 @@ public class World
     {
         var regex = new Regex(pattern);
         return Objects.Count(x => regex.IsMatch(x.ItemName));
+    }
+
+    public int CountWorldObjectByKeyword(string keyword)
+    {
+        var count = 0;
+
+        foreach (var obj in Objects)
+        {
+            var item = GameSettingsManager.Instance.GetItem(obj.GetItemName());
+
+            if (item is null) continue;
+
+            if (item.HasKeyword(keyword)) count++;
+        }
+
+        return count;
     }
 
     public int GetAvailableBuildingId()
