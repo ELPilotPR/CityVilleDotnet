@@ -10,6 +10,7 @@
 	<script type="text/javascript" src="flash_integration.min.js"></script>
 	<script type="text/javascript" src="swfobject.min.js"></script>
 	<script type="text/javascript" src="ruffle/ruffle.js"></script>
+	<script type="text/javascript" src="lang/locale_en_US_overrides.js"></script>
 }
 
 <div style="width:760px;height:594px;">
@@ -106,7 +107,7 @@
 	}
 
 	function getLocaleOverrides() {
-		return null;
+		return window.__cvLocaleOverrides || null;
 	}
 
 	function getFlashApp() {
